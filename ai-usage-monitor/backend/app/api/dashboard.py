@@ -3,16 +3,25 @@ from fastapi import APIRouter, Query
 from app.db.session import get_db
 from app.models import AgentRun, PromptLog
 from app.services.agent_tracker import diff_run
+from app.services.prompt_capture import purge_expired_prompt_logs
 
 router = APIRouter(prefix="/dashboard")
 
 
 @router.get("/prompts")
-def list_prompts(ai_asset: str | None = None, has_pii: bool | None = None, limit: int = 50):
+def list_prompts(
+    ai_asset: str | None = None,
+    search: str | None = None,
+    has_pii: bool | None = None,
+    limit: int = 50,
+):
     db = next(get_db())
+    purge_expired_prompt_logs(db)
     q = db.query(PromptLog)
     if ai_asset:
         q = q.filter(PromptLog.ai_asset == ai_asset)
+    if search:
+        q = q.filter(PromptLog.sanitized_prompt.ilike(f"%{search}%"))
     if has_pii is True:
         q = q.filter(PromptLog.pii_detected != {})
     logs = q.order_by(PromptLog.id.desc()).limit(limit).all()

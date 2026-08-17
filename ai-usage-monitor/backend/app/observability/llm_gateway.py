@@ -4,8 +4,7 @@ import httpx
 from fastapi import APIRouter, Request, Response
 
 from app.db.session import get_db
-from app.models import PromptLog
-from app.services.pii import redact
+from app.services.prompt_capture import capture_prompt_log
 
 router = APIRouter()
 
@@ -31,22 +30,17 @@ async def proxy_llm_call(request: Request):
     resp_json = upstream_resp.json()
     usage = resp_json.get("usage", {})
 
-    sanitized_prompt, pii_counts = redact(prompt_text)
-
     db = next(get_db())
-    db.add(
-        PromptLog(
-            ai_asset=request.headers.get("x-ai-asset", "unknown"),
-            model=model,
-            sanitized_prompt=sanitized_prompt,
-            pii_detected=pii_counts,
-            input_tokens=usage.get("input_tokens"),
-            output_tokens=usage.get("output_tokens"),
-            latency_ms=latency_ms,
-            status=upstream_resp.status_code,
-        )
+    capture_prompt_log(
+        db,
+        ai_asset=request.headers.get("x-ai-asset", "unknown"),
+        model=model,
+        prompt_text=prompt_text,
+        input_tokens=usage.get("input_tokens"),
+        output_tokens=usage.get("output_tokens"),
+        latency_ms=latency_ms,
+        status=upstream_resp.status_code,
     )
-    db.commit()
 
     return Response(
         content=upstream_resp.content,

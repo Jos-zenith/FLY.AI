@@ -1,3 +1,5 @@
+import json
+
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -7,7 +9,8 @@ from app.core.config import settings
 from app.core.database import Base, engine, get_db
 from app.models.usage_event import UsageEvent
 from app.observability.llm_gateway import router as llm_gateway_router
-from app.services.agent_tracker import compare_declared_vs_observed
+from app.services.agent_tracker import AgentRunContext, diff_run, record_access, record_tool_invocation
+from app.services.llm_client import LLMClient
 from app.services.pii import detect_pii, redact
 
 Base.metadata.create_all(bind=engine)
@@ -35,13 +38,15 @@ def chat(payload: dict, db: Session = Depends(get_db)):
     message = str(payload.get("message", ""))
     sanitized, pii_metadata = redact(message)
     findings = detect_pii(message)
+    client = LLMClient(model_name=str(payload.get("model", "mock-model")))
+    llm_result = client.generate(sanitized)
 
     event = UsageEvent(
         application="chat",
         user_id=str(payload.get("user_id", "anonymous")),
         session_id=str(payload.get("session_id", "unknown")),
         event_type="chat_message",
-        payload={"message": sanitized, "pii_detected": pii_metadata},
+        payload=json.dumps({"message": sanitized, "pii_detected": pii_metadata, "llm_response": llm_result}),
     )
     db.add(event)
     db.commit()
@@ -51,15 +56,33 @@ def chat(payload: dict, db: Session = Depends(get_db)):
         "message": sanitized,
         "pii_detected": findings,
         "pii_metadata": pii_metadata,
+        "response": llm_result["response"],
+        "model": llm_result["model"],
         "event_id": event.id,
     }
 
 
 @app.post("/agent/run")
 def run_agent(payload: dict):
-    declared = payload.get("declared_tools", [])
-    observed = payload.get("observed_tools", [])
-    return compare_declared_vs_observed(declared, observed)
+    agent_id = str(payload.get("agent_id", "testbed-agent"))
+    declared = ["FAQ DB"]
+    should_query_orders = bool(payload.get("query_orders") or payload.get("customer_mentions_orders") or False)
+
+    tools_invoked = ["faq_lookup"]
+    if should_query_orders:
+        tools_invoked.append("orders_lookup")
+
+    with AgentRunContext(agent_id=agent_id, declared_sources=declared, tools_invoked=tools_invoked) as run:
+        record_tool_invocation("faq_lookup", {"query": payload.get("message", "support ticket")})
+        record_access("FAQ DB")
+        if should_query_orders:
+            record_tool_invocation(
+                "orders_lookup",
+                {"reason": "customer_mentions_orders", "ticket_id": payload.get("ticket_id")},
+            )
+            record_access("Orders DB")
+
+    return diff_run(run.run_id)
 
 
 @app.get("/dashboard/summary")

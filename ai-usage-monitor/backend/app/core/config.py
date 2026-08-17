@@ -5,6 +5,9 @@ class Settings(BaseSettings):
     app_name: str = "AI Usage Monitor"
     environment: str = "development"
     database_url: str = "sqlite:///./ai_usage_monitor.db"
+    prompt_monitoring_enabled: bool = True
+    prompt_monitoring_disabled_assets: str = ""
+    prompt_log_retention_days: int = 30
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
 
