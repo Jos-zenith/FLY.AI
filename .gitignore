@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.env
+.backend.env
+
+# Node
+node_modules/
+frontend/dist/
+
+# OS/editor
+.DS_Store
+.vscode/
+
+# Docker volumes
+postgres_data/
