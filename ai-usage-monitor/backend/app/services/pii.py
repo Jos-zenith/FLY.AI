@@ -24,11 +24,14 @@ def get_ner():
     if pipeline is None:
         return None
     if _ner_pipeline is None:
-        _ner_pipeline = pipeline(
-            "ner",
-            model="dslim/bert-base-NER",
-            aggregation_strategy="simple",
-        )
+        try:
+            _ner_pipeline = pipeline(
+                "ner",
+                model="dslim/bert-base-NER",
+                aggregation_strategy="simple",
+            )
+        except RuntimeError:
+            return None
     return _ner_pipeline
 
 
@@ -92,16 +95,18 @@ def _resolve_overlaps(spans: List[Span]) -> List[Span]:
     return sorted(kept, key=lambda s: (s.start, s.end))
 
 
-def detect_pii(text: str):
-    return [
-        {
+def detect_pii(text: str, include_values: bool = False):
+    findings = []
+    for span in detect(text):
+        item = {
             "type": span.label,
-            "value": (text or "")[span.start:span.end],
             "source": span.source,
             "score": span.score,
         }
-        for span in detect(text)
-    ]
+        if include_values:
+            item["value"] = (text or "")[span.start:span.end]
+        findings.append(item)
+    return findings
 
 
 def redact(text: str) -> tuple[str, dict]:

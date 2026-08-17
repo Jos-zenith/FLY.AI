@@ -5,6 +5,15 @@ const API_URL = 'http://localhost:8000'
 function App() {
   const [summary, setSummary] = useState({ total_events: 0, applications: [] })
   const [usageEvents, setUsageEvents] = useState([])
+  const [analytics, setAnalytics] = useState({
+    usage_over_time: [],
+    model_usage: [],
+    asset_comparison: [],
+    token_usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+    latency: { avg_latency_ms: 0, samples: 0 },
+    failure_rate: { failed: 0, total: 0, rate: 0 },
+    agent_run_durations: [],
+  })
   const [piiSummary, setPiiSummary] = useState({})
   const [promptRows, setPromptRows] = useState([])
   const [agentRuns, setAgentRuns] = useState([])
@@ -16,14 +25,16 @@ function App() {
 
   const loadOverview = async () => {
     try {
-      const [summaryResp, usageResp, piiResp, runsResp] = await Promise.all([
+      const [summaryResp, usageResp, analyticsResp, piiResp, runsResp] = await Promise.all([
         fetch(`${API_URL}/dashboard/summary`).then((res) => res.json()),
         fetch(`${API_URL}/dashboard/usage`).then((res) => res.json()),
+        fetch(`${API_URL}/dashboard/analytics`).then((res) => res.json()),
         fetch(`${API_URL}/dashboard/prompts/pii-summary`).then((res) => res.json()),
         fetch(`${API_URL}/dashboard/runs?limit=25`).then((res) => res.json()),
       ])
       setSummary(summaryResp)
       setUsageEvents(usageResp)
+      setAnalytics(analyticsResp)
       setPiiSummary(piiResp)
       setAgentRuns(runsResp)
     } catch (error) {
@@ -88,11 +99,11 @@ function App() {
     <div className="dashboard-shell">
       <header className="hero">
         <div>
-          <p className="eyebrow">Phase 6 dashboard</p>
+          <p className="eyebrow">AI observability dashboard</p>
           <h1>AI Usage Monitor</h1>
           <p>
-            Track prompt volume, see which assets leak PII most often, browse sanitized prompts,
-            and flag declared-vs-observed agent mismatches.
+            Track request trends, model usage, token volume, latency, failures, asset comparisons,
+            and declared-vs-observed governance gaps in one place.
           </p>
         </div>
         <button onClick={loadOverview}>Refresh data</button>
@@ -117,6 +128,25 @@ function App() {
         </div>
       </section>
 
+      <section className="summary-grid analytics-grid">
+        <div className="card metric-card">
+          <span>Total tokens</span>
+          <strong>{analytics.token_usage.total_tokens}</strong>
+        </div>
+        <div className="card metric-card">
+          <span>Avg latency</span>
+          <strong>{Math.round(analytics.latency.avg_latency_ms || 0)} ms</strong>
+        </div>
+        <div className="card metric-card">
+          <span>Failure rate</span>
+          <strong>{analytics.failure_rate.rate || 0}%</strong>
+        </div>
+        <div className="card metric-card">
+          <span>Assets tracked</span>
+          <strong>{analytics.asset_comparison.length}</strong>
+        </div>
+      </section>
+
       <section className="grid-two">
         <div className="card">
           <div className="section-heading">
@@ -126,19 +156,24 @@ function App() {
             </div>
           </div>
           <div className="chart-list">
-            {requestCounts.map((row) => (
-              <div key={row.asset} className="chart-row">
-                <div className="chart-labels">
-                  <span>{row.asset}</span>
-                  <small>{row.count} requests · {piiCounts[row.asset] || 0} PII hits</small>
+            {(analytics.asset_comparison.length ? analytics.asset_comparison : requestCounts).map((row) => {
+              const assetName = row.asset || row.name || row.ai_asset || 'unknown'
+              const requests = row.requests || row.count || 0
+              const piiHits = row.pii_events || piiCounts[assetName] || 0
+              return (
+                <div key={assetName} className="chart-row">
+                  <div className="chart-labels">
+                    <span>{assetName}</span>
+                    <small>{requests} requests · {piiHits} PII hits</small>
+                  </div>
+                  <div className="bars">
+                    <div className="bar request" style={{ width: `${Math.min(100, requests * 12)}%` }} />
+                    <div className="bar pii" style={{ width: `${Math.min(100, piiHits * 12)}%` }} />
+                  </div>
                 </div>
-                <div className="bars">
-                  <div className="bar request" style={{ width: `${Math.min(100, row.count * 12)}%` }} />
-                  <div className="bar pii" style={{ width: `${Math.min(100, (piiCounts[row.asset] || 0) * 12)}%` }} />
-                </div>
-              </div>
-            ))}
-            {!requestCounts.length && <p className="muted">No prompt traffic yet.</p>}
+              )
+            })}
+            {!analytics.asset_comparison.length && !requestCounts.length && <p className="muted">No prompt traffic yet.</p>}
           </div>
         </div>
 
@@ -169,6 +204,112 @@ function App() {
               )
             })}
             {!Object.keys(piiSummary).length && <p className="muted">No PII detections yet.</p>}
+          </div>
+        </div>
+      </section>
+
+      <section className="grid-two analytics-panels">
+        <div className="card">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Trend analysis</p>
+              <h2>Usage over time</h2>
+            </div>
+          </div>
+          <div className="chart-list">
+            {analytics.usage_over_time.map((day) => (
+              <div key={day.date} className="chart-row compact-row">
+                <div className="chart-labels">
+                  <span>{day.date}</span>
+                  <small>{day.requests} requests · {day.total_tokens} tokens</small>
+                </div>
+                <div className="bars">
+                  <div className="bar request" style={{ width: `${Math.min(100, (day.requests / Math.max(...analytics.usage_over_time.map((item) => item.requests), 1)) * 100)}%` }} />
+                </div>
+              </div>
+            ))}
+            {!analytics.usage_over_time.length && <p className="muted">No trend data yet.</p>}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Model analytics</p>
+              <h2>Model usage</h2>
+            </div>
+          </div>
+          <div className="governance-list">
+            {analytics.model_usage.map((model) => (
+              <div key={model.model} className="governance-row">
+                <div>
+                  <strong>{model.model}</strong>
+                  <small>{model.requests} requests</small>
+                </div>
+                <div className="label-pills">
+                  <span className="pill">{model.input_tokens} in</span>
+                  <span className="pill">{model.output_tokens} out</span>
+                  <span className="pill">{Math.round(model.avg_latency_ms || 0)} ms</span>
+                </div>
+              </div>
+            ))}
+            {!analytics.model_usage.length && <p className="muted">No model data yet.</p>}
+          </div>
+        </div>
+      </section>
+
+      <section className="grid-two analytics-panels">
+        <div className="card">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Operational health</p>
+              <h2>Failure rate and latency</h2>
+            </div>
+          </div>
+          <div className="governance-list">
+            <div className="governance-row">
+              <div>
+                <strong>Failure rate</strong>
+                <small>{analytics.failure_rate.failed} of {analytics.failure_rate.total} requests</small>
+              </div>
+              <div className="label-pills">
+                <span className="pill">{analytics.failure_rate.rate}%</span>
+              </div>
+            </div>
+            <div className="governance-row">
+              <div>
+                <strong>Average latency</strong>
+                <small>{analytics.latency.samples} samples</small>
+              </div>
+              <div className="label-pills">
+                <span className="pill">{Math.round(analytics.latency.avg_latency_ms || 0)} ms</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Runner health</p>
+              <h2>Agent execution duration</h2>
+            </div>
+          </div>
+          <div className="governance-list">
+            {analytics.agent_run_durations.map((run) => (
+              <div key={run.agent_id} className="governance-row">
+                <div>
+                  <strong>{run.agent_id}</strong>
+                  <small>{run.runs} runs</small>
+                </div>
+                <div className="label-pills">
+                  <span className="pill">{run.avg_seconds}s avg</span>
+                  <span className="pill">{run.completed} complete</span>
+                  <span className="pill">{run.failed} failed</span>
+                </div>
+              </div>
+            ))}
+            {!analytics.agent_run_durations.length && <p className="muted">No agent runs recorded yet.</p>}
           </div>
         </div>
       </section>

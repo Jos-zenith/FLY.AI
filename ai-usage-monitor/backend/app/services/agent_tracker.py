@@ -5,6 +5,7 @@ from typing import Any
 import app.db.session as db_session
 from app.models.access_event import AccessEvent
 from app.models.agent_run import AgentRun
+from app.services.pii import redact
 
 _current_run_id: ContextVar[str | None] = ContextVar("current_run_id", default=None)
 _current_tools_invoked: ContextVar[list[str] | None] = ContextVar("current_tools_invoked", default=None)
@@ -77,6 +78,19 @@ def record_access(source_name: str, source_type: str = "database"):
     db.commit()
 
 
+def _redact_tool_arguments(value: Any):
+    if isinstance(value, str):
+        redacted, _ = redact(value)
+        return redacted
+    if isinstance(value, dict):
+        return {key: _redact_tool_arguments(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_tool_arguments(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_tool_arguments(item) for item in value)
+    return value
+
+
 def record_tool_invocation(tool_name: str, arguments: dict[str, Any] | None = None):
     run_id = _current_run_id.get()
     if run_id is None:
@@ -87,7 +101,8 @@ def record_tool_invocation(tool_name: str, arguments: dict[str, Any] | None = No
     _current_tools_invoked.set(invoked)
 
     calls = list(_current_tool_calls.get() or [])
-    calls.append({"tool_name": tool_name, "arguments": arguments or {}})
+    sanitized_args = _redact_tool_arguments(arguments or {})
+    calls.append({"tool_name": tool_name, "arguments": sanitized_args})
     _current_tool_calls.set(calls)
 
 

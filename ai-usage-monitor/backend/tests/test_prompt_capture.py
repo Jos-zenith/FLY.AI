@@ -1,15 +1,25 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+
+provider = trace.get_tracer_provider()
+if provider.__class__.__name__ == "ProxyTracerProvider":
+    provider = TracerProvider()
+    trace.set_tracer_provider(provider)
 
 import app.api.dashboard as dashboard_module
 import app.observability.llm_gateway as llm_gateway_module
 from app.core.database import Base
 from app.main import app
 from app.models.prompt_log import PromptLog
+from app.services.agent_tracker import AgentRunContext, diff_run, record_access
 from app.services.prompt_capture import purge_expired_prompt_logs
 
 
@@ -81,6 +91,145 @@ def test_prompt_monitoring_can_be_disabled_per_asset(monkeypatch):
 
     assert response.status_code == 200
     assert client.get("/dashboard/prompts").json() == []
+
+
+def test_gateway_emits_otel_spans_for_llm_calls(monkeypatch):
+    Session, _ = _shared_session()
+    session = Session()
+
+    monkeypatch.setattr(llm_gateway_module, "get_db", lambda: iter([session]))
+    monkeypatch.setattr(dashboard_module, "get_db", lambda: iter([session]))
+
+    async def fake_post(self, url, json, headers, timeout):
+        return _FakeResponse()
+
+    monkeypatch.setattr("httpx.AsyncClient.post", fake_post)
+
+    exporter = InMemorySpanExporter()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+
+    client = TestClient(app)
+    response = client.post(
+        "/gateway/v1/messages",
+        json={"model": "claude-3", "messages": [{"role": "user", "content": "Contact alice@example.com"}]},
+        headers={"x-ai-asset": "customer-support"},
+    )
+
+    assert response.status_code == 200
+    span_names = [span.name for span in exporter.get_finished_spans()]
+    assert "llm_gateway.call" in span_names
+    assert any("customer-support" in str(attr) for span in exporter.get_finished_spans() for attr in span.attributes.values())
+
+
+def test_gateway_filters_sensitive_headers(monkeypatch):
+    Session, _ = _shared_session()
+    session = Session()
+    monkeypatch.setattr(llm_gateway_module, "get_db", lambda: iter([session]))
+
+    captured = {}
+
+    async def fake_post(self, url, json, headers, timeout):
+        captured.update(headers)
+        return _FakeResponse()
+
+    monkeypatch.setattr("httpx.AsyncClient.post", fake_post)
+
+    client = TestClient(app)
+    response = client.post(
+        "/gateway/v1/messages",
+        json={"model": "claude-3", "messages": [{"role": "user", "content": "Contact alice@example.com"}]},
+        headers={
+            "x-ai-asset": "customer-support",
+            "x-secret-token": "abc123",
+            "authorization": "Bearer secret-token",
+            "cookie": "session=abc",
+            "x-forwarded-for": "1.2.3.4",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "x-ai-asset" in captured
+    assert "x-secret-token" not in captured
+    assert "authorization" not in captured
+    assert "cookie" not in captured
+    assert "x-forwarded-for" not in captured
+
+
+def test_failed_upstream_request_returns_502_and_does_not_store_raw_pii(monkeypatch):
+    Session, _ = _shared_session()
+    session = Session()
+    monkeypatch.setattr(llm_gateway_module, "get_db", lambda: iter([session]))
+
+    async def fake_post(self, url, json, headers, timeout):
+        raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr("httpx.AsyncClient.post", fake_post)
+
+    client = TestClient(app)
+    response = client.post(
+        "/gateway/v1/messages",
+        json={"model": "claude-3", "messages": [{"role": "user", "content": "Contact alice@example.com"}]},
+        headers={"x-ai-asset": "customer-support"},
+    )
+
+    assert response.status_code == 502
+    assert session.query(PromptLog).count() == 0
+    assert "alice@example.com" not in response.text
+
+
+def test_raw_pii_is_absent_from_every_stored_location(monkeypatch):
+    Session, _ = _shared_session()
+    session = Session()
+    monkeypatch.setattr(llm_gateway_module, "get_db", lambda: iter([session]))
+
+    async def fake_post(self, url, json, headers, timeout):
+        return _FakeResponse()
+
+    monkeypatch.setattr("httpx.AsyncClient.post", fake_post)
+
+    client = TestClient(app)
+    client.post(
+        "/gateway/v1/messages",
+        json={"model": "claude-3", "messages": [{"role": "user", "content": "Call alice@example.com"}]},
+        headers={"x-ai-asset": "customer-support"},
+    )
+
+    log = session.query(PromptLog).one()
+    assert "alice@example.com" not in log.sanitized_prompt
+    assert "alice@example.com" not in str(log.pii_detected)
+
+
+def test_multiple_agent_runs_remain_distinct(monkeypatch):
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    session = sessionmaker(bind=engine)()
+    monkeypatch.setattr("app.services.agent_tracker.db_session.get_db", lambda: iter([session]))
+
+    with AgentRunContext(agent_id="alpha", declared_sources=["faq_db"]) as first:
+        record_access("faq_db")
+    with AgentRunContext(agent_id="beta", declared_sources=["orders_db"]) as second:
+        record_access("orders_db")
+
+    first_result = diff_run(first.run_id, db=session)
+    second_result = diff_run(second.run_id, db=session)
+
+    assert first_result["agent_id"] == "alpha"
+    assert second_result["agent_id"] == "beta"
+    assert first_result["observed"] == ["faq_db"]
+    assert second_result["observed"] == ["orders_db"]
+
+
+def test_sqlite_fallback_is_used_when_postgres_is_unavailable(monkeypatch):
+    import app.core.database as database_module
+
+    monkeypatch.setattr(database_module, "settings", type("S", (), {"database_url": "postgresql+psycopg://postgres:postgres@localhost:5432/demo"})())
+
+    fallback_engine = database_module._make_engine("sqlite:///./pytest_ai_usage_monitor.db")
+    assert str(fallback_engine.url).startswith("sqlite")
 
 
 def test_retention_purges_old_prompt_logs():

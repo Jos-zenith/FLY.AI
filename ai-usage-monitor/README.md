@@ -1,65 +1,177 @@
 # AI Usage Monitor
 
-A starter project for monitoring AI usage patterns, tracking agent behavior, detecting PII, and surfacing a dashboard for review.
+This repository contains a lightweight AI observability testbed for tracking usage, prompt activity, PII exposure, and agent governance drift across a small local deployment. The app is intentionally separate from the root Betty project and is designed to demonstrate how a monitoring layer can record sanitized activity without pretending to be a production-grade enterprise governance system.
+
+## Project goals
+
+- Capture prompt and model metadata from an AI gateway path
+- Trace agent runs and compare declared vs observed data sources
+- Redact or count common PII patterns before storage
+- Surface usage analytics in a browser-based dashboard
+- Provide a realistic local demo environment for evaluation and testing
 
 ## Stack
 
 - Backend: Python + FastAPI
-- Database: PostgreSQL
+- Database: PostgreSQL-first configuration with SQLite fallback for local demo use
 - Frontend: React + Vite
-- Monitoring: OpenTelemetry-friendly observability hooks
-- Testing: minimal pytest smoke tests
+- Observability: OpenTelemetry FastAPI and HTTPX instrumentation plus custom gateway tracing spans
+- Testing: pytest regression suite and frontend Vitest smoke tests
 
-## Structure
+## Directory layout
 
-- `backend/` contains the API, models, services, and DB configuration.
-- `frontend/` contains the dashboard UI.
-- `testbed/` contains a fake customer support app and fake data used to simulate usage.
-- `docs/` contains architecture and capability notes.
+```text
+ai-usage-monitor/
+├── backend/
+│   ├── app/
+│   │   ├── api/
+│   │   ├── core/
+│   │   ├── db/
+│   │   ├── models/
+│   │   ├── observability/
+│   │   └── services/
+│   ├── tests/
+│   ├── requirements.txt
+│   └── .env.example
+├── frontend/
+│   ├── src/
+│   ├── package.json
+│   └── vite.config.js
+├── docs/
+│   └── capability-matrix.md
+├── README.md
+└── docker-compose.yml
+```
 
-## Local startup
+## Data flow overview
 
-1. Create and activate a backend venv.
-2. Install dependencies:
-   ```bash
-   cd backend
-   pip install -r requirements.txt
-   ```
-3. Start PostgreSQL locally or via Docker.
-4. Run the API:
-   ```bash
-   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-   ```
-5. Run the frontend:
-   ```bash
-   cd frontend
-   npm install
-   npm run dev
-   ```
+```text
+Client / support app
+        |
+        v
+POST /chat or /agent/run
+        |
+        v
+FastAPI app
+  - redacts prompt text and detects PII
+  - records sanitized prompt logs
+  - wraps agent tool calls and source access
+  - emits OpenTelemetry spans
+        |
+        +----------+----------------------------+
+        |                                        |
+        v                                        v
+LLM gateway / upstream provider         SQLite/PostgreSQL database
+  - filters secret headers                 - prompt_logs table
+  - records model + token metadata         - access_events table
+  - captures latency and status            - agent_runs table
+        |                                        |
+        v                                        v
+Dashboard /analytics + /prompts + /runs -> Browser UI
+```
 
-## Main routes
+## Clean install and startup
 
-- `POST /chat`
-- `POST /agent/run`
-- `GET /dashboard/summary`
-- `GET /dashboard/usage`
+From the repository root:
 
-## Prompt capture notes
+```bash
+cd ai-usage-monitor/backend
+python -m venv .venv
+. .venv/Scripts/activate   # Windows
+# or: source .venv/bin/activate  # macOS/Linux
+pip install -r requirements.txt
+```
 
-- Prompts are sanitized before persistence.
-- Stored metadata includes PII type counts only, never the raw prompt text.
-- Prompt monitoring can be disabled per asset with `PROMPT_MONITORING_DISABLED_ASSETS`.
-- Retention is controlled with `PROMPT_LOG_RETENTION_DAYS` and old records are purged automatically.
-- Sanitized prompts remain searchable through the dashboard prompt listing.
+Start PostgreSQL if desired:
 
-## Known failure modes
+```bash
+cd ..
+docker compose up -d db
+```
 
-- Regex can miss unstructured names like "call Ramesh" if the surrounding context is weak.
-- NER can flag common capitalized words mid-sentence as names or organizations.
-- Neither regex nor NER reliably detects PII hidden inside code snippets, base64 blobs, or similarly encoded text.
+If PostgreSQL is unavailable, the app automatically falls back to SQLite for local demo runs.
 
-## Agent observability limits
+Run the backend:
 
-- The app only sees tool calls and database accesses that flow through the wrappers in `app/services/agent_tracker.py`.
-- If a library makes its own network or database call outside those wrappers, that access will not appear in `access_events`.
-- Observed sources are derived from distinct `access_events.source_name` values, so nested internal reads may collapse into one visible source unless they are wrapped separately.
+```bash
+cd backend
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Run the frontend:
+
+```bash
+cd frontend
+npm install
+npm run dev -- --host 0.0.0.0 --port 3000
+```
+
+Open the UI at http://localhost:3000 and the API at http://localhost:8000/docs.
+
+## Main endpoints
+
+- `POST /chat` — demo chat endpoint with PII sanitize/redact flow
+- `POST /agent/run` — runs a synthetic agent with declared vs observed sources
+- `GET /dashboard/summary` — basic event summary
+- `GET /dashboard/usage` — recent usage events
+- `GET /dashboard/analytics` — usage over time, model usage, tokens, latency, failure rate, asset comparison, agent runtime summary
+- `GET /dashboard/prompts` — sanitized prompt browsing and filtering
+- `GET /dashboard/runs` — agent execution records
+
+## Evaluator notes
+
+This monitor is intentionally a realistic demo/testbed, not a production security product. The code is structured to support honest evaluation of the following:
+
+- what the gateway can observe
+- what is stored locally after redaction
+- what triggers agent governance mismatch warnings
+- what the dashboard can show from real execution data
+
+## Privacy and governance boundary
+
+- Raw prompt text is not stored in the local database.
+- PII counts and sanitized prompts are stored instead.
+- Tool arguments and prompt traces are sanitized before persistence.
+- The gateway still forwards the original prompt to the configured upstream AI provider. That is a real limitation of any proxy architecture and is explicitly documented here.
+- Access control is optional and demo-only. It is not a production authorization model.
+
+## PII detection limits
+
+The project supports best-effort detection for:
+
+- email addresses
+- phone numbers
+- PAN/Aadhaar-like identifiers
+- common credit-card patterns
+
+It does not guarantee dependable identity resolution for all names or all real-world text. Name detection may miss weakly contextual names or produce false positives for capitalized words and organizations.
+
+## Deployment and repo status
+
+- Deployment: local Docker Compose and FastAPI/Vite startup workflow are supported for development and evaluation.
+- Public repository: this project is not yet published as a public GitHub repository in this workspace snapshot, so no public link is included here.
+
+## Verification commands
+
+Run the backend tests from the backend folder:
+
+```bash
+pytest -q
+```
+
+Run the frontend tests:
+
+```bash
+cd frontend
+npm install
+npm test
+```
+
+The documented verification path is intentionally simple enough to reproduce on a clean local install.
+
+## Known limitations
+
+- Gateway protection is lightweight and not production hardened.
+- PII detection is heuristic and should not be treated as a definitive identity classifier.
+- Instrumentation only captures events that pass through the implemented wrappers and spans.
+- This project is suitable as a monitoring demo and evaluation artifact, not as a full enterprise AI governance platform.

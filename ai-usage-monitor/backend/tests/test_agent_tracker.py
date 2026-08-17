@@ -94,6 +94,8 @@ def test_chat_endpoint_calls_mock_llm_and_logs_event():
     assert data["response"] == "This is a mock LLM response for usage tracking."
     assert data["model"] == "mock-model"
     assert data["event_id"] > 0
+    assert "alice@example.com" not in data["message"]
+    assert "alice@example.com" not in data["pii_detected"]
 
 
 def test_agent_endpoint_records_declared_vs_observed(monkeypatch):
