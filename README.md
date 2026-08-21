@@ -8,10 +8,10 @@ On engineering and system design, the build follows that priority order end to e
 
 Agent runs declare their data sources up front and get diffed against what was actually touched at runtime, so a governance reviewer gets a real record instead of a trust-the-config-file assumption. For accuracy, both flows are covered by an automated test suite that asserts the actual effect (a suppressed capture really doesn't appear in the prompt log; a scope violation really gets flagged), not just that an endpoint returns 200.
 
-The reasoning behind what got built and in what order — grounded in the 2023 Samsung–ChatGPT case, three user personas
-An engineer who never opens the dashboard
-A governance lead who needs evidence rather than a shrug
-A backend engineer 
+The reasoning behind what got built and in what order — grounded in the 2023 Samsung–ChatGPT case, three user personas,
+* An engineer who never opens the dashboard
+* A governance lead who needs evidence rather than a shrug
+* A backend engineer 
 who needs an honest capability matrix instead of a marketing claim), their journey maps and the Priority–Impact matrix that separated the quick wins from the major projects — is written up separately:
 https://docs.google.com/document/d/1lkFk6jss1cMlSCq3leTT5JE7hZrrnF6PA4jojcZJqcc/edit?usp=sharing
 
