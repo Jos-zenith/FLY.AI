@@ -17,3 +17,10 @@ frontend/dist/
 
 # Docker volumes
 postgres_data/
+
+# Local databases (SQLite fallback files)
+*.db
+*.sqlite3
+
+# Test caches
+.pytest_cache/

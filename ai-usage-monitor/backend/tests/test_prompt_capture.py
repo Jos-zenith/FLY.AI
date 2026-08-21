@@ -254,3 +254,92 @@ def test_retention_purges_old_prompt_logs():
     deleted = purge_expired_prompt_logs(session, retention_days=30)
     assert deleted == 1
     assert session.query(PromptLog).count() == 0
+
+
+def test_chat_endpoint_traffic_is_visible_in_dashboard_analytics(monkeypatch):
+    from app.core.database import get_db as real_get_db
+
+    Session, _ = _shared_session()
+    session = Session()
+
+    monkeypatch.setattr(dashboard_module, "get_db", lambda: iter([session]))
+    def _override_get_db():
+        yield session
+
+    app.dependency_overrides[real_get_db] = _override_get_db
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/chat",
+            json={"message": "Contact alice@example.com", "user_id": "u-1", "session_id": "s-1"},
+        )
+        assert response.status_code == 200
+
+        # /chat should feed the same PromptLog-backed pipeline as /gateway,
+        # so it shows up in the sanitized prompt list and the analytics
+        # endpoint instead of only living in the UsageEvent table.
+        prompts = client.get("/dashboard/prompts", params={"ai_asset": "chat"}).json()
+        assert prompts
+        assert "alice@example.com" not in prompts[0]["sanitized_prompt"]
+        assert prompts[0]["pii_detected"] == {"EMAIL": 1}
+
+        analytics = client.get("/dashboard/analytics").json()
+        chat_row = next((row for row in analytics["asset_comparison"] if row["asset"] == "chat"), None)
+        assert chat_row is not None
+        assert chat_row["requests"] == 1
+    finally:
+        app.dependency_overrides.pop(real_get_db, None)
+
+
+def test_chat_endpoint_respects_per_asset_monitoring_disable(monkeypatch):
+    from app.core.database import get_db as real_get_db
+
+    Session, _ = _shared_session()
+    session = Session()
+
+    monkeypatch.setattr(dashboard_module, "get_db", lambda: iter([session]))
+    monkeypatch.setattr("app.services.prompt_capture.settings.prompt_monitoring_disabled_assets", "chat")
+    def _override_get_db():
+        yield session
+
+    app.dependency_overrides[real_get_db] = _override_get_db
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/chat",
+            json={"message": "Call Ramesh", "user_id": "u-1", "session_id": "s-1"},
+        )
+        assert response.status_code == 200
+        assert client.get("/dashboard/prompts", params={"ai_asset": "chat"}).json() == []
+    finally:
+        app.dependency_overrides.pop(real_get_db, None)
+
+
+def test_usage_analytics_counts_only_real_pii_detects(monkeypatch):
+    import app.api.dashboard as dashboard_module
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    dashboard_module.Base.metadata.create_all(bind=engine)
+    session = sessionmaker(bind=engine)()
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    session.add_all(
+        [
+            PromptLog(ai_asset="support", model="model-a", sanitized_prompt="hello", pii_detected={}, created_at=now),
+            PromptLog(ai_asset="support", model="model-a", sanitized_prompt="hello", pii_detected={"EMAIL": 1}, created_at=now),
+            PromptLog(ai_asset="sales", model="model-b", sanitized_prompt="hello", pii_detected={"PHONE": 2}, created_at=now),
+            PromptLog(ai_asset="sales", model="model-b", sanitized_prompt="hello", pii_detected=None, created_at=now),
+        ]
+    )
+    session.commit()
+
+    monkeypatch.setattr(dashboard_module, "get_db", lambda: iter([session]))
+
+    result = dashboard_module.usage_analytics()
+
+    assert result["usage_over_time"][0]["pii_events"] == 3
+    assert result["asset_comparison"][0]["pii_events"] == 3

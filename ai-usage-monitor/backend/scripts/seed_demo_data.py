@@ -1,0 +1,128 @@
+"""Seed the running AI Usage Monitor with a realistic demo dataset.
+
+This does NOT insert fake rows directly into the database. It drives the
+real HTTP endpoints (/chat and /agent/run) so every row on the dashboard
+was produced by the actual monitoring pipeline -- PII detection, prompt
+sanitization, and the declared-vs-observed agent tracker all run for
+real. That matters for a live demo: what you show an evaluator is the
+system actually working, not a fixture.
+
+Usage (with the backend already running, e.g. `uvicorn app.main:app`):
+
+    python scripts/seed_demo_data.py
+    python scripts/seed_demo_data.py --base-url http://127.0.0.1:8000
+
+What it creates:
+  - A handful of /chat prompts across different AI assets, some carrying
+    realistic PII (email, phone, credit card) so the PII governance
+    donut and the Prompts tab have real detections to show.
+  - One CLEAN agent run: declared "FAQ DB", and it only touches FAQ DB.
+    Shows up in Agent Runs as "Within scope".
+  - One SCOPE-BREACH agent run: declared "FAQ DB", but the customer
+    message mentions an order, so the agent also queries Orders DB --
+    a data source it never declared. Shows up in Agent Runs flagged as
+    a scope violation, which is the exact failure mode described in the
+    Samsung ChatGPT case study this project is modeled on.
+"""
+
+import argparse
+import sys
+
+import httpx
+
+CHAT_PROMPTS = [
+    {
+        "ai_asset": "customer-support",
+        "model": "gpt-4",
+        "message": "Please reset the account for alice@example.com, she can't log in.",
+    },
+    {
+        "ai_asset": "customer-support",
+        "model": "gpt-4",
+        "message": "Customer callback requested at 9840123456 regarding ticket TKT-104.",
+    },
+    {
+        "ai_asset": "billing-agent",
+        "model": "claude-3",
+        "message": "Refund request -- card on file is 4111 1111 1111 1111, please confirm before processing.",
+    },
+    {
+        "ai_asset": "chat",
+        "model": "gpt-4",
+        "message": "Summarize this quarter's support ticket volume by category.",
+    },
+    {
+        "ai_asset": "customer-support",
+        "model": "gpt-4",
+        "message": "Following up with bob.customer@example.com about the refund status.",
+    },
+]
+
+CLEAN_AGENT_RUN = {
+    "agent_id": "support-agent-clean",
+    "message": "What's in the FAQ about return windows?",
+    "query_orders": False,
+}
+
+SCOPE_BREACH_AGENT_RUN = {
+    "agent_id": "support-agent-breach",
+    "message": "Customer is asking about their recent order status, can you check?",
+    "ticket_id": "TKT-104",
+    "customer_mentions_orders": True,
+}
+
+
+def seed(base_url: str) -> None:
+    with httpx.Client(base_url=base_url, timeout=10.0) as client:
+        print(f"Seeding demo data against {base_url} ...\n")
+
+        print("-- Sending sample chat prompts --")
+        for prompt in CHAT_PROMPTS:
+            resp = client.post("/chat", json=prompt)
+            resp.raise_for_status()
+            data = resp.json()
+            pii = data.get("pii_metadata") or {}
+            pii_summary = ", ".join(f"{k}:{v}" for k, v in pii.items()) or "none"
+            print(f"  [{prompt['ai_asset']}] \"{data['message'][:60]}\" -- PII: {pii_summary}")
+
+        print("\n-- Running a CLEAN agent (declared FAQ DB, touches only FAQ DB) --")
+        resp = client.post("/agent/run", json=CLEAN_AGENT_RUN)
+        resp.raise_for_status()
+        clean = resp.json()
+        print(f"  run_id={clean['run_id']} declared={clean['declared']} observed={clean['observed']}")
+        print(f"  governance_alert={clean['governance_alert']} (expected: False)")
+
+        print("\n-- Running a SCOPE-BREACH agent (declared FAQ DB, also touches Orders DB) --")
+        resp = client.post("/agent/run", json=SCOPE_BREACH_AGENT_RUN)
+        resp.raise_for_status()
+        breach = resp.json()
+        print(f"  run_id={breach['run_id']} declared={breach['declared']} observed={breach['observed']}")
+        print(f"  unexpected={breach['unexpected']}")
+        print(f"  governance_alert={breach['governance_alert']} (expected: True)")
+
+        print("\nDone. Open the dashboard's Agent Runs tab to see both runs, and Overview/Prompts for PII data.")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--base-url",
+        default="http://127.0.0.1:8000",
+        help="Base URL of the running backend (default: http://127.0.0.1:8000)",
+    )
+    args = parser.parse_args()
+
+    try:
+        seed(args.base_url)
+    except httpx.ConnectError:
+        print(
+            f"Could not reach {args.base_url} -- is the backend running?\n"
+            "  cd ai-usage-monitor/backend && uvicorn app.main:app --reload --port 8000",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -17,11 +17,23 @@ REGEX_PATTERNS = {
 }
 
 _ner_pipeline = None
+_ner_load_failed = False
 
 
 def get_ner():
-    global _ner_pipeline
-    if pipeline is None:
+    """Lazily load the optional NER pipeline.
+
+    Loading can fail for reasons other than the package being absent --
+    no network access to fetch model weights, no disk space, an
+    incompatible transformers/torch build, etc. The original code only
+    caught RuntimeError and never remembered a failed load, so a bad
+    environment meant every single request re-attempted the same slow,
+    doomed model load. We now catch any load failure and cache it, so
+    the app degrades once to regex-only detection instead of paying that
+    cost (and risking new failure modes) on every request.
+    """
+    global _ner_pipeline, _ner_load_failed
+    if pipeline is None or _ner_load_failed:
         return None
     if _ner_pipeline is None:
         try:
@@ -30,7 +42,8 @@ def get_ner():
                 model="dslim/bert-base-NER",
                 aggregation_strategy="simple",
             )
-        except RuntimeError:
+        except Exception:
+            _ner_load_failed = True
             return None
     return _ner_pipeline
 
@@ -47,11 +60,38 @@ class Span:
     score: float = 1.0
 
 
+def _luhn_checksum_valid(digits: str) -> bool:
+    """Standard Luhn (mod-10) check used by real card issuers.
+
+    Without this, the CREDIT_CARD regex flags any 13-16 digit run --
+    order numbers, tracking IDs, ticket numbers -- as a card number.
+    Requiring a valid Luhn checksum cuts that false-positive rate
+    sharply, since an arbitrary digit run only passes by chance ~1 in 10
+    times, while every real card number is constructed to pass it.
+    """
+    total = 0
+    parity = len(digits) % 2
+    for index, char in enumerate(digits):
+        value = int(char)
+        if index % 2 == parity:
+            value *= 2
+            if value > 9:
+                value -= 9
+        total += value
+    return total % 10 == 0
+
+
 def detect(text: str) -> List[Span]:
     spans: List[Span] = []
 
     for label, pattern in REGEX_PATTERNS.items():
         for match in pattern.finditer(text or ""):
+            if label == "CREDIT_CARD":
+                candidate_digits = re.sub(r"[ -]", "", match.group())
+                if not (13 <= len(candidate_digits) <= 19 and _luhn_checksum_valid(candidate_digits)):
+                    # Doesn't pass the Luhn checksum -- treat it as a
+                    # non-card digit run rather than redacting it as PII.
+                    continue
             spans.append(Span(match.start(), match.end(), label, "regex"))
 
     ner = get_ner()

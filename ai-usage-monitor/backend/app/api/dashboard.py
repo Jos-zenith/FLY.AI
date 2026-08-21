@@ -1,11 +1,22 @@
+from collections import defaultdict
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import case, func
 
+from app.core.database import Base
 from app.core.config import settings
 from app.db.session import get_db
 from app.models import AgentRun, PromptLog
 from app.services.agent_tracker import diff_run
 from app.services.prompt_capture import purge_expired_prompt_logs
+
+
+def _pii_total_for_log(log: PromptLog) -> int:
+    if not log.pii_detected:
+        return 0
+    if isinstance(log.pii_detected, dict):
+        return sum(int(value) for value in log.pii_detected.values() if value)
+    return 0
 
 
 def require_dashboard_access(x_api_key: str | None = Header(default=None, alias="X-API-Key"), authorization: str | None = Header(default=None)):
@@ -74,79 +85,100 @@ def pii_summary_by_asset(_=Depends(require_dashboard_access)):
 def usage_analytics(_=Depends(require_dashboard_access)):
     db = next(get_db())
 
-    request_rows = db.query(
-        func.date(PromptLog.created_at).label("date"),
-        func.count(PromptLog.id).label("requests"),
-        func.sum(case((PromptLog.pii_detected.isnot(None), 1), else_=0)).label("pii_events"),
-        func.coalesce(func.sum(PromptLog.input_tokens), 0).label("input_tokens"),
-        func.coalesce(func.sum(PromptLog.output_tokens), 0).label("output_tokens"),
-        func.avg(PromptLog.latency_ms).label("avg_latency_ms"),
-        func.sum(case((PromptLog.status >= 400, 1), else_=0)).label("failed"),
-    ).group_by(func.date(PromptLog.created_at)).order_by(func.date(PromptLog.created_at)).all()
+    logs = db.query(PromptLog).all()
+
+    usage_by_day = defaultdict(lambda: {"requests": 0, "pii_events": 0, "input_tokens": 0, "output_tokens": 0, "failed": 0})
+    model_usage = defaultdict(lambda: {"requests": 0, "input_tokens": 0, "output_tokens": 0, "avg_latency_ms": 0.0, "latency_samples": 0})
+    asset_usage = defaultdict(lambda: {"requests": 0, "pii_events": 0, "input_tokens": 0, "output_tokens": 0, "failed": 0, "avg_latency_ms": 0.0, "latency_samples": 0})
+
+    for log in logs:
+        day = log.created_at.date().isoformat() if log.created_at else "unknown"
+        usage = usage_by_day[day]
+        usage["requests"] += 1
+        usage["pii_events"] += _pii_total_for_log(log)
+        usage["input_tokens"] += int(log.input_tokens or 0)
+        usage["output_tokens"] += int(log.output_tokens or 0)
+        usage["failed"] += 1 if (log.status or 0) >= 400 else 0
+
+        model = model_usage.setdefault((log.model or "unknown"), {"requests": 0, "input_tokens": 0, "output_tokens": 0, "avg_latency_ms": 0.0, "latency_samples": 0})
+        model["requests"] += 1
+        model["input_tokens"] += int(log.input_tokens or 0)
+        model["output_tokens"] += int(log.output_tokens or 0)
+        model["avg_latency_ms"] += float(log.latency_ms or 0)
+        model["latency_samples"] += 1
+
+        asset = asset_usage.setdefault(log.ai_asset or "unknown", {"requests": 0, "pii_events": 0, "input_tokens": 0, "output_tokens": 0, "failed": 0, "avg_latency_ms": 0.0, "latency_samples": 0})
+        asset["requests"] += 1
+        asset["pii_events"] += _pii_total_for_log(log)
+        asset["input_tokens"] += int(log.input_tokens or 0)
+        asset["output_tokens"] += int(log.output_tokens or 0)
+        asset["failed"] += 1 if (log.status or 0) >= 400 else 0
+        asset["avg_latency_ms"] += float(log.latency_ms or 0)
+        asset["latency_samples"] += 1
 
     usage_over_time = []
-    for row in request_rows:
-        total_tokens = (row.input_tokens or 0) + (row.output_tokens or 0)
+    for date_key in sorted(usage_by_day):
+        row = usage_by_day[date_key]
         usage_over_time.append(
             {
-                "date": row.date,
-                "requests": int(row.requests or 0),
-                "pii_events": int(row.pii_events or 0),
-                "input_tokens": int(row.input_tokens or 0),
-                "output_tokens": int(row.output_tokens or 0),
-                "total_tokens": int(total_tokens),
-                "avg_latency_ms": round(float(row.avg_latency_ms or 0), 2),
-                "failed": int(row.failed or 0),
+                "date": date_key,
+                "requests": int(row["requests"]),
+                "pii_events": int(row["pii_events"]),
+                "input_tokens": int(row["input_tokens"]),
+                "output_tokens": int(row["output_tokens"]),
+                "total_tokens": int(row["input_tokens"] + row["output_tokens"]),
+                "avg_latency_ms": 0.0,
+                "failed": int(row["failed"]),
             }
         )
 
-    model_rows = db.query(
-        PromptLog.model,
-        func.count(PromptLog.id).label("requests"),
-        func.coalesce(func.sum(PromptLog.input_tokens), 0).label("input_tokens"),
-        func.coalesce(func.sum(PromptLog.output_tokens), 0).label("output_tokens"),
-        func.avg(PromptLog.latency_ms).label("avg_latency_ms"),
-    ).group_by(PromptLog.model).order_by(func.count(PromptLog.id).desc()).all()
+    model_usage_rows = []
+    for model_name, row in sorted(model_usage.items(), key=lambda item: item[1]["requests"], reverse=True):
+        model_usage_rows.append(
+            {
+                "model": model_name,
+                "requests": int(row["requests"]),
+                "input_tokens": int(row["input_tokens"]),
+                "output_tokens": int(row["output_tokens"]),
+                "avg_latency_ms": round(float(row["avg_latency_ms"] / row["latency_samples"]) if row["latency_samples"] else 0.0, 2),
+            }
+        )
 
-    model_usage = [
-        {
-            "model": row.model or "unknown",
-            "requests": int(row.requests or 0),
-            "input_tokens": int(row.input_tokens or 0),
-            "output_tokens": int(row.output_tokens or 0),
-            "avg_latency_ms": round(float(row.avg_latency_ms or 0), 2),
-        }
-        for row in model_rows
-    ]
+    asset_rows = []
+    for asset_name, row in sorted(asset_usage.items(), key=lambda item: item[1]["requests"], reverse=True):
+        asset_rows.append(
+            {
+                "asset": asset_name,
+                "requests": int(row["requests"]),
+                "pii_events": int(row["pii_events"]),
+                "input_tokens": int(row["input_tokens"]),
+                "output_tokens": int(row["output_tokens"]),
+                "avg_latency_ms": round(float(row["avg_latency_ms"] / row["latency_samples"]) if row["latency_samples"] else 0.0, 2),
+                "failed": int(row["failed"]),
+            }
+        )
 
-    asset_rows = db.query(
-        PromptLog.ai_asset,
-        func.count(PromptLog.id).label("requests"),
-        func.sum(case((PromptLog.pii_detected.isnot(None), 1), else_=0)).label("pii_events"),
-        func.coalesce(func.sum(PromptLog.input_tokens), 0).label("input_tokens"),
-        func.coalesce(func.sum(PromptLog.output_tokens), 0).label("output_tokens"),
-        func.avg(PromptLog.latency_ms).label("avg_latency_ms"),
-        func.sum(case((PromptLog.status >= 400, 1), else_=0)).label("failed"),
-    ).group_by(PromptLog.ai_asset).order_by(func.count(PromptLog.id).desc()).all()
+    total_requests = len(logs)
+    total_failures = sum(1 for log in logs if (log.status or 0) >= 400)
+    total_input = sum(int(log.input_tokens or 0) for log in logs)
+    total_output = sum(int(log.output_tokens or 0) for log in logs)
+    avg_latency = sum(float(log.latency_ms or 0) for log in logs) / total_requests if total_requests else 0
 
-    asset_comparison = [
-        {
-            "asset": row.ai_asset,
-            "requests": int(row.requests or 0),
-            "pii_events": int(row.pii_events or 0),
-            "input_tokens": int(row.input_tokens or 0),
-            "output_tokens": int(row.output_tokens or 0),
-            "avg_latency_ms": round(float(row.avg_latency_ms or 0), 2),
-            "failed": int(row.failed or 0),
-        }
-        for row in asset_rows
-    ]
+    total_pii_events = sum(_pii_total_for_log(log) for log in logs)
 
-    total_requests = db.query(PromptLog).count()
-    total_failures = db.query(PromptLog).filter(PromptLog.status >= 400).count()
-    total_input = db.query(func.coalesce(func.sum(PromptLog.input_tokens), 0)).scalar() or 0
-    total_output = db.query(func.coalesce(func.sum(PromptLog.output_tokens), 0)).scalar() or 0
-    avg_latency = db.query(func.avg(PromptLog.latency_ms)).scalar() or 0
+    if asset_rows:
+        asset_rows.insert(
+            0,
+            {
+                "asset": "all_assets",
+                "requests": total_requests,
+                "pii_events": total_pii_events,
+                "input_tokens": total_input,
+                "output_tokens": total_output,
+                "avg_latency_ms": round(float(avg_latency), 2),
+                "failed": total_failures,
+            },
+        )
 
     duration_rows = db.query(
         AgentRun.agent_id,
@@ -171,8 +203,8 @@ def usage_analytics(_=Depends(require_dashboard_access)):
 
     return {
         "usage_over_time": usage_over_time,
-        "model_usage": model_usage,
-        "asset_comparison": asset_comparison,
+        "model_usage": model_usage_rows,
+        "asset_comparison": asset_rows,
         "token_usage": {
             "input_tokens": int(total_input),
             "output_tokens": int(total_output),

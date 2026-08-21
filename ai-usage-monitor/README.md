@@ -30,6 +30,8 @@ ai-usage-monitor/
 │   │   ├── models/
 │   │   ├── observability/
 │   │   └── services/
+│   ├── scripts/
+│   │   └── seed_demo_data.py   # populates a clean run + a scope-violation run
 │   ├── tests/
 │   ├── requirements.txt
 │   └── .env.example
@@ -37,11 +39,16 @@ ai-usage-monitor/
 │   ├── src/
 │   ├── package.json
 │   └── vite.config.js
+├── testbed/
+│   └── customer_support_demo.py   # synthetic customer-support scenario generator
 ├── docs/
-│   └── capability-matrix.md
+│   ├── architecture.excalidraw   # editable diagram, open at excalidraw.com
+│   └── capability-matrix.md      # zero-code vs gateway vs SDK observability comparison
 ├── README.md
 └── docker-compose.yml
 ```
+
+See [`docs/capability-matrix.md`](docs/capability-matrix.md) for the full zero-code / gateway / SDK-instrumentation observability comparison, and [`docs/architecture.excalidraw`](docs/architecture.excalidraw) for an editable version of the diagram below (drag-and-drop it onto [excalidraw.com](https://excalidraw.com)).
 
 ## Data flow overview
 
@@ -108,6 +115,23 @@ npm run dev -- --host 0.0.0.0 --port 3000
 
 Open the UI at http://localhost:3000 and the API at http://localhost:8000/docs.
 
+## Demo data
+
+The dashboard starts empty. To populate it with a realistic scenario for a live demo or recorded walkthrough, run the seed script against the running backend:
+
+```bash
+cd backend
+python scripts/seed_demo_data.py
+```
+
+This drives the real `/chat` and `/agent/run` endpoints (it does not write fake rows directly into the database), and produces:
+
+- Several sanitized chat prompts across different AI assets, some carrying real PII (email, phone, credit card) so the PII governance donut and Prompts tab have genuine detections to show.
+- One **clean** agent run — declared `FAQ DB`, and it only ever touches `FAQ DB`. Shows up in Agent Runs as "Within scope".
+- One **scope-violation** agent run — declared `FAQ DB`, but the simulated customer message mentions an order, so the agent also queries `Orders DB`, a source it never declared. This is the exact failure mode from the Samsung ChatGPT case study this project is modeled on: an AI assistant reaching a data source nobody approved for it.
+
+The Agent Runs tab renders this as a visual diff, not just a status line: the Observed row highlights the undeclared source inline with a warning icon, and an amber "Scope violation: Orders DB" pill sits next to the run.
+
 ## Main endpoints
 
 - `POST /chat` — demo chat endpoint with PII sanitize/redact flow
@@ -144,7 +168,9 @@ The project supports best-effort detection for:
 - PAN/Aadhaar-like identifiers
 - common credit-card patterns
 
-It does not guarantee dependable identity resolution for all names or all real-world text. Name detection may miss weakly contextual names or produce false positives for capitalized words and organizations.
+It does not guarantee dependable identity resolution for all names or all real-world text. Name detection may miss weakly contextual names or produce false positives for capitalized words and organizations. A Luhn checksum guards the credit-card pattern specifically, since a bare 13-16 digit regex alone flags order numbers and tracking IDs as card numbers far too often.
+
+Every detection is stored as structured metadata alongside the sanitized text, not just inline redaction markers — e.g. a prompt containing an email and a phone number is stored as `sanitized_prompt: "Contact <EMAIL> or <PHONE>"` with `pii_detected: {"EMAIL": 1, "PHONE": 1}`. The Prompts and Overview tabs read this metadata directly, so the dashboard can show *what kind* of PII was caught, not just that something was.
 
 ## Deployment and repo status
 

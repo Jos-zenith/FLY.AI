@@ -13,6 +13,7 @@ from app.observability.otel import initialize_observability
 from app.services.agent_tracker import AgentRunContext, diff_run, record_access, record_tool_invocation
 from app.services.llm_client import LLMClient
 from app.services.pii import detect_pii, redact
+from app.services.prompt_capture import capture_prompt_log
 
 Base.metadata.create_all(bind=engine)
 
@@ -54,9 +55,12 @@ def health_check():
 @app.post("/chat")
 def chat(payload: dict, db: Session = Depends(get_db), _=Depends(require_monitor_access)):
     message = str(payload.get("message", ""))
+    ai_asset = str(payload.get("ai_asset", "chat"))
+    model_name = str(payload.get("model", "mock-model"))
+
     sanitized, pii_metadata = redact(message)
     findings = detect_pii(message)
-    client = LLMClient(model_name=str(payload.get("model", "mock-model")))
+    client = LLMClient(model_name=model_name)
     llm_result = client.generate(sanitized)
 
     event = UsageEvent(
@@ -69,6 +73,19 @@ def chat(payload: dict, db: Session = Depends(get_db), _=Depends(require_monitor
     db.add(event)
     db.commit()
     db.refresh(event)
+
+    # Route through the same safe-capture pipeline the /gateway path uses,
+    # so /chat traffic also shows up in /dashboard/analytics and
+    # /dashboard/prompts, and respects the same per-asset monitoring
+    # toggle and retention policy as every other AI asset instead of being
+    # invisible to governance queries.
+    capture_prompt_log(
+        db,
+        ai_asset=ai_asset,
+        model=model_name,
+        prompt_text=message,
+        status=200,
+    )
 
     return {
         "message": sanitized,
