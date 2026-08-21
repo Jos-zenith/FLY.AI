@@ -6,7 +6,13 @@ import { AnalyticsView } from './components/views/AnalyticsView.jsx'
 import { PromptsView } from './components/views/PromptsView.jsx'
 import { RunsView } from './components/views/RunsView.jsx'
 
-const API_URL = 'http://localhost:8000'
+// Vite only inlines env vars that exist at build time, so VITE_API_URL
+// must be set in Vercel's project settings (not just a local .env) and
+// the site redeployed afterward for it to take effect -- Vercel does not
+// rebuild an already-deployed site just because an env var changed.
+// Falls back to the deployed Render backend so a build without the env
+// var set still points somewhere real instead of localhost.
+const API_URL = import.meta.env.VITE_API_URL || 'https://fly-ai-dgsd.onrender.com'
 
 const VIEW_META = {
   overview: {

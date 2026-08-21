@@ -51,7 +51,8 @@ ai-usage-monitor/
 ├── frontend/
 │   ├── src/
 │   ├── package.json
-│   └── vite.config.js
+│   ├── vite.config.js
+│   └── .env.example
 ├── testbed/
 │   └── customer_support_demo.py   # synthetic customer-support scenario generator
 ├── docs/
@@ -218,7 +219,18 @@ Every detection is stored as structured metadata alongside the sanitized text, n
 ## Deployment and repo status
 
 - Repository: https://github.com/Jos-zenith/FLY.AI — confirm this is set to **Public** under Settings → General → Danger Zone before submitting, since a private repo an evaluator can't open counts against "Public GitHub repository."
-- Deployment: local Docker Compose and FastAPI/Vite startup workflow are supported for development and evaluation. No hosted deployment link is included yet — the brief marks this "if possible," but a live link (Render/Railway/Fly.io for the backend, Vercel/Netlify for the frontend) is worth adding if time allows, since it's one of the few differentiators an evaluator can check in seconds without cloning anything.
+- Deployed: backend on Render (`https://fly-ai-dgsd.onrender.com`), frontend on Vercel (`https://vict-ai.vercel.app`).
+
+### Deploying (Render backend + Vercel frontend)
+
+Two environment variables connect the two deployed halves, and both are easy to get half-right:
+
+1. **Render (backend) → `CORS_ALLOWED_ORIGINS`.** Comma-separated list of every frontend origin allowed to call this API — see `backend/.env.example`. It must be the deployed Vercel URL exactly (scheme + host, no trailing slash), or every request from the live frontend fails CORS preflight with `No 'Access-Control-Allow-Origin' header is present`. A Vercel *preview* deployment (e.g. a PR branch) gets its own random subdomain and needs adding here too if preview builds should reach the API.
+2. **Vercel (frontend) → `VITE_API_URL`.** Set to the Render backend URL — see `frontend/.env.example`. Two things trip this up specifically:
+   - **Vite only inlines env vars at build time.** `src/App.jsx` falls back to the deployed Render URL if `VITE_API_URL` is unset, so a build without it still points somewhere real instead of `localhost:8000` — but if you add or change the variable in Vercel's project settings, the *already-deployed* site does not pick it up until a new build runs. Vercel → Deployment Overview → `...` next to Visit → **Redeploy**.
+   - **No hardcoded `localhost` URLs in frontend code.** `API_URL` in `src/App.jsx` is the single source of truth for the API base URL — grep for `localhost:8000` before deploying if you've copy-pasted a `fetch(...)` call anywhere else.
+
+If you see a CORS error in the browser console after deploying, check these in order: (a) is the frontend actually calling the Render URL, not `localhost` — read the failing request's URL in the console, not just the error text; (b) does `CORS_ALLOWED_ORIGINS` on Render list that exact Vercel origin; (c) did Render actually restart after that env var was added (Render, like Vercel, doesn't hot-reload env var changes into a running service).
 
 ## Verification commands
 

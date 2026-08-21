@@ -11,8 +11,18 @@ class Settings(BaseSettings):
     demo_mode: bool = True
     access_control_enabled: bool = False
     monitor_api_key: str = "demo-ai-monitor-key"
+    # Comma-separated list of allowed frontend origins for CORS. Defaults
+    # cover local dev plus the deployed Vercel frontend. A Vercel *preview*
+    # deployment (a PR branch, say) gets its own random subdomain that
+    # won't match this list -- add it here (or set CORS_ALLOWED_ORIGINS in
+    # Render's env vars) if you need preview builds to reach the API too.
+    cors_allowed_origins: str = "http://localhost:3000,http://localhost:5173,https://vict-ai.vercel.app"
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
+
+    @property
+    def cors_allowed_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
 
 
 settings = Settings()
