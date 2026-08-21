@@ -199,6 +199,54 @@ def test_raw_pii_is_absent_from_every_stored_location(monkeypatch):
     assert "alice@example.com" not in str(log.pii_detected)
 
 
+def test_chat_forwards_raw_text_to_model_but_never_stores_it(monkeypatch):
+    # This is the regression test for the project's core privacy claim on
+    # the /chat path specifically: "PII is redacted before storage, but
+    # the raw prompt still reaches the AI model." That's only true if
+    # /chat actually forwards raw text to the model client (not the
+    # sanitized version) AND never lets that raw text leak back into
+    # local storage through the response it gets back.
+    from app.core.database import get_db as real_get_db
+    from app.models.usage_event import UsageEvent
+    from app.services.llm_client import LLMClient
+
+    Session, _ = _shared_session()
+    session = Session()
+
+    def _override_get_db():
+        yield session
+
+    app.dependency_overrides[real_get_db] = _override_get_db
+
+    received_prompts = []
+    original_generate = LLMClient.generate
+
+    def _spy_generate(self, prompt):
+        received_prompts.append(prompt)
+        return original_generate(self, prompt)
+
+    monkeypatch.setattr("app.services.llm_client.LLMClient.generate", _spy_generate)
+
+    try:
+        client = TestClient(app)
+        client.post(
+            "/chat",
+            json={"message": "My email is alice@example.com", "user_id": "u-1", "session_id": "s-1"},
+        )
+
+        # The model client received the RAW message, not the sanitized one.
+        assert received_prompts == ["My email is alice@example.com"]
+
+        # ...but that raw text never made it into local storage, despite
+        # LLMClient.generate() echoing its input prompt back in its
+        # return value (see llm_client.py) -- the endpoint must strip
+        # that before persisting.
+        event = session.query(UsageEvent).order_by(UsageEvent.id.desc()).first()
+        assert "alice@example.com" not in event.payload
+    finally:
+        app.dependency_overrides.pop(real_get_db, None)
+
+
 def test_multiple_agent_runs_remain_distinct(monkeypatch):
     engine = create_engine(
         "sqlite://",

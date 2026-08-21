@@ -1,4 +1,5 @@
 import json
+from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,13 +21,25 @@ from app.schemas import (
     UsageEventOut,
 )
 from app.services.agent_tracker import AgentRunContext, diff_run, record_access, record_tool_invocation
+from app.services.asset_registry import ensure_default_assets
 from app.services.llm_client import LLMClient
 from app.services.pii import detect_pii, redact
 from app.services.prompt_capture import capture_prompt_log
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title=settings.app_name, version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    db = next(get_db())
+    try:
+        ensure_default_assets(db)
+    finally:
+        db.close()
+    yield
+
+
+app = FastAPI(title=settings.app_name, version="1.0.0", lifespan=lifespan)
 initialize_observability(app)
 app.include_router(llm_gateway_router)
 app.include_router(dashboard_router)
@@ -70,14 +83,33 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db), _=Depends(require_
     sanitized, pii_metadata = redact(message)
     findings = detect_pii(message)
     client = LLMClient(model_name=model_name)
-    llm_result = client.generate(sanitized)
+    # Forward the RAW message to the model client, not the sanitized
+    # version. This project's whole premise is that redaction protects
+    # local storage but does not stop the upstream AI provider from
+    # seeing the original text -- the /gateway path already forwards raw
+    # text for the same reason (see llm_gateway.py). If /chat quietly
+    # sent sanitized text instead, that premise would just be false for
+    # this endpoint, not a documented limitation.
+    llm_result = client.generate(message)
 
     event = UsageEvent(
         application="chat",
         user_id=payload.user_id,
         session_id=payload.session_id,
         event_type="chat_message",
-        payload=json.dumps({"message": sanitized, "pii_detected": pii_metadata, "llm_response": llm_result}),
+        payload=json.dumps(
+            {
+                "message": sanitized,
+                "pii_detected": pii_metadata,
+                # Only model + response text, never llm_result verbatim:
+                # LLMClient.generate() echoes back whatever prompt it was
+                # given (mirroring how a real provider response can
+                # include it), and that's now the RAW message above.
+                # Storing llm_result as-is would silently put raw PII
+                # back into local storage through this side door.
+                "llm_response": {"model": llm_result["model"], "response": llm_result["response"]},
+            }
+        ),
     )
     db.add(event)
     db.commit()

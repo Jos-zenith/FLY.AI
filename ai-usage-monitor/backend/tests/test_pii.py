@@ -21,6 +21,24 @@ def test_redact_pii_replaces_values_and_returns_counts():
     assert redact_pii(text) == redacted
 
 
+def test_ssn_is_detected_and_redacted():
+    text = "His SSN on file is 123-45-6789."
+    redacted, counts = redact(text)
+    assert "123-45-6789" not in redacted
+    assert "<SSN>" in redacted
+    assert counts.get("SSN") == 1
+
+
+def test_bare_nine_digit_run_is_not_flagged_as_ssn():
+    # No dashes -- this is the same false-positive shape the Luhn check
+    # guards against for CREDIT_CARD: a bare digit run (order number,
+    # reference id) should not be redacted as an SSN just because it
+    # happens to be nine digits long.
+    findings = detect("Reference number 123456789 for your order.")
+    labels = {item.label for item in findings}
+    assert "SSN" not in labels
+
+
 def test_valid_luhn_card_number_is_flagged_as_credit_card():
     # 4111111111111111 is the standard Visa test number and passes Luhn.
     text = "Card on file: 4111111111111111"

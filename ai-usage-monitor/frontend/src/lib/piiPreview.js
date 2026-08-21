@@ -11,6 +11,7 @@ const PREVIEW_PATTERNS = [
   { label: 'CREDIT_CARD', pattern: /\b(?:\d[ -]*?){13,16}\b/g },
   { label: 'PAN', pattern: /\b[A-Z]{5}[0-9]{4}[A-Z]\b/g },
   { label: 'AADHAAR', pattern: /\b\d{4}\s?\d{4}\s?\d{4}\b/g },
+  { label: 'SSN', pattern: /\b\d{3}-\d{2}-\d{4}\b/g },
 ]
 
 export function previewPiiCounts(text) {

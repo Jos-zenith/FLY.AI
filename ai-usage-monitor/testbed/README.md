@@ -1,11 +1,11 @@
 # Synthetic customer-support testbed
 
-This directory provides a lightweight, realistic customer-support scenario that exercises the monitor without requiring a full external application.
+This directory defines realistic customer-support scenarios and drives them through the **real** running monitor — `POST /chat` and `POST /agent/run` — rather than pre-computing what the pipeline should output. `backend/scripts/seed_demo_data.py` imports `SCENARIOS` from here and calls `drive_scenarios(...)` as part of the standard seeding flow, so running the seed script exercises this module every time; it isn't a separate, disconnected demo path.
 
 It intentionally models:
-- a customer support agent using a FAQ lookup and an orders lookup
-- a redacted prompt that still demonstrates PII masking
-- declared vs observed data sources to show governance alerting
-- token, latency, and provider metadata close to real LLM activity
+- a customer-support agent handling a refund, an order-status check, and a billing question
+- real PII in the raw customer message (email, phone, card number) — redaction happens inside the real `/chat` endpoint, not here, so what ends up on the dashboard is genuinely what the pipeline detected
+- one scenario that mentions an order, which makes the agent reach into Orders DB — a source it never declares — to show a real scope-violation verdict from `app/services/agent_tracker.py`, not a scripted one
+- token/latency metadata that comes back from the real endpoint response, not a hand-authored fixture
 
-The generated scenario is designed to be realistic enough for demos and regression tests while remaining lightweight enough for a local repo.
+See `customer_support_demo.py`'s module docstring for why it's built this way: an earlier version generated a scenario dict with its own hand-rolled redaction and a pre-computed governance verdict that nothing ever fed into the actual monitor — realistic-looking, but disconnected from the system it was meant to test. `backend/tests/test_testbed_demo.py` asserts against the real pipeline's output (via FastAPI's `TestClient`) to keep it that way.

@@ -5,6 +5,7 @@ import { OverviewView } from './components/views/OverviewView.jsx'
 import { AnalyticsView } from './components/views/AnalyticsView.jsx'
 import { PromptsView } from './components/views/PromptsView.jsx'
 import { RunsView } from './components/views/RunsView.jsx'
+import { AssetsView } from './components/views/AssetsView.jsx'
 
 // Vite only inlines env vars that exist at build time, so VITE_API_URL
 // must be set in Vercel's project settings (not just a local .env) and
@@ -31,6 +32,10 @@ const VIEW_META = {
     title: 'Agent Runs',
     description: 'Declared scope vs. what each agent actually touched.',
   },
+  assets: {
+    title: 'AI Assets',
+    description: 'Every AI tool this monitor knows about, its declared purpose and data sources, and whether monitoring is on.',
+  },
 }
 
 function App() {
@@ -50,6 +55,7 @@ function App() {
   const [piiSummary, setPiiSummary] = useState({})
   const [promptRows, setPromptRows] = useState([])
   const [agentRuns, setAgentRuns] = useState([])
+  const [assets, setAssets] = useState([])
   const [promptSearch, setPromptSearch] = useState('')
   const [promptAsset, setPromptAsset] = useState('')
   const [promptHasPii, setPromptHasPii] = useState(false)
@@ -107,6 +113,43 @@ function App() {
       console.error(error)
       setApiError(error.message || 'The prompt feed could not be loaded.')
     }
+  }
+
+  const loadAssets = async () => {
+    try {
+      const rows = await fetch(`${API_URL}/dashboard/assets`).then(readJsonResponse)
+      setAssets(rows)
+    } catch (error) {
+      console.error(error)
+      // Deliberately no setApiError here: the chat hero renders before the
+      // dashboard ever loads, and a registry fetch failure there shouldn't
+      // block sending a prompt -- assetOptions just falls back to the
+      // hardcoded defaults below.
+    }
+  }
+
+  // Loaded once on mount, independent of `stage` -- the hero page's
+  // monitoring toggle needs this list before the user ever reaches the
+  // dashboard.
+  useEffect(() => {
+    loadAssets()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const toggleAssetMonitoring = async (name, enabled) => {
+    const res = await fetch(`${API_URL}/dashboard/assets/${encodeURIComponent(name)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ monitoring_enabled: enabled }),
+    })
+    const updated = await readJsonResponse(res)
+    setAssets((prev) => {
+      const exists = prev.some((row) => row.name === updated.name)
+      return exists
+        ? prev.map((row) => (row.name === updated.name ? updated : row))
+        : [...prev, updated].sort((a, b) => a.name.localeCompare(b.name))
+    })
+    return updated
   }
 
   useEffect(() => {
@@ -174,7 +217,9 @@ function App() {
     return (
       <ChatHero
         onSubmit={handleChatSubmit}
-        assetOptions={['customer-support', 'chat', 'billing-agent']}
+        assetOptions={assets.length ? assets.map((row) => row.name) : ['customer-support', 'chat', 'billing-agent']}
+        assets={assets}
+        onToggleMonitoring={toggleAssetMonitoring}
         sessionCaught={sessionCaught}
       />
     )
@@ -238,6 +283,10 @@ function App() {
           )}
 
           {activeView === 'runs' && <RunsView agentRuns={agentRuns} />}
+
+          {activeView === 'assets' && (
+            <AssetsView assets={assets} onToggleMonitoring={toggleAssetMonitoring} onRefresh={loadAssets} />
+          )}
         </div>
       </main>
     </div>

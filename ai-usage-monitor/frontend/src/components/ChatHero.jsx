@@ -12,6 +12,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { previewPiiCounts } from '../lib/piiPreview.js'
+import { ToggleSwitch } from './views/AssetsView.jsx'
 
 const SUGGESTIONS = [
   'Write a reminder email to Ramesh, phone 98401xxxxx.',
@@ -45,14 +46,36 @@ function isReadableFile(file) {
   return READABLE_EXTENSIONS.some((ext) => name.endsWith(ext))
 }
 
-export function ChatHero({ onSubmit, assetOptions = [], sessionCaught = 0 }) {
+export function ChatHero({ onSubmit, assetOptions = [], assets = [], onToggleMonitoring, sessionCaught = 0 }) {
   const [message, setMessage] = useState('')
   const [asset, setAsset] = useState(assetOptions[0] || 'customer-support')
   const [attachment, setAttachment] = useState(null)
   const [attachError, setAttachError] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [monitorBusy, setMonitorBusy] = useState(false)
   const fileInputRef = useRef(null)
+
+  // Kingsly, per his own persona journey map, never opens the internal
+  // dashboard -- so the monitoring on/off control for the asset he's
+  // currently using has to live here, at the point of use, not buried in
+  // a settings screen he'll never see.
+  const currentAssetRow = assets.find((row) => row.name === asset)
+  const monitoringEnabled = currentAssetRow ? currentAssetRow.monitoring_enabled : true
+
+  const handleToggleMonitoring = async (next) => {
+    if (!onToggleMonitoring) return
+    setMonitorBusy(true)
+    try {
+      await onToggleMonitoring(asset, next)
+    } catch {
+      // Silently ignored here -- this control lives on the send path, not
+      // a form with its own error surface. A failed toggle just leaves
+      // monitoring in its previous state, visible on the next render.
+    } finally {
+      setMonitorBusy(false)
+    }
+  }
 
   const canSubmit = (message.trim() || attachment) && !busy
 
@@ -120,7 +143,7 @@ export function ChatHero({ onSubmit, assetOptions = [], sessionCaught = 0 }) {
         <div className="chat-hero-brand">
           <span className="chat-hero-mark" aria-hidden="true" />
           <div>
-            <span className="chat-hero-brand-title">Vict AI</span>
+            <span className="chat-hero-brand-title">AI Usage Monitor</span>
             <span className="chat-hero-brand-tag">Catches sensitive data in AI prompts before it becomes a leak</span>
           </div>
         </div>
@@ -131,6 +154,7 @@ export function ChatHero({ onSubmit, assetOptions = [], sessionCaught = 0 }) {
       </div>
 
       <div className="chat-hero-body">
+        <p className="eyebrow">A working demo, not a mockup</p>
         <h1>Send a prompt. Watch what this tool catches.</h1>
 
         <div className="chat-input-shell card-3d">
@@ -186,6 +210,24 @@ export function ChatHero({ onSubmit, assetOptions = [], sessionCaught = 0 }) {
                   </option>
                 ))}
               </select>
+              {onToggleMonitoring && (
+                <div
+                  className="chat-monitor-toggle"
+                  title={
+                    monitoringEnabled
+                      ? `Monitoring is on for "${asset}" -- prompts through it are captured and scanned`
+                      : `Monitoring is off for "${asset}" -- prompts through it are not captured or stored`
+                  }
+                >
+                  <span className="chat-monitor-toggle-label">{monitoringEnabled ? 'Monitored' : 'Not monitored'}</span>
+                  <ToggleSwitch
+                    checked={monitoringEnabled}
+                    onChange={handleToggleMonitoring}
+                    disabled={monitorBusy}
+                    label={`Toggle monitoring for ${asset}`}
+                  />
+                </div>
+              )}
             </div>
 
             <button
@@ -234,6 +276,15 @@ export function ChatHero({ onSubmit, assetOptions = [], sessionCaught = 0 }) {
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="chat-hero-footnote">
+          <ShieldAlert size={15} strokeWidth={2.2} aria-hidden="true" />
+          <p>
+            PII is redacted before it's stored in this dashboard — but, just like a real deployment, the raw
+            prompt still reaches the underlying AI model. That gap between "hidden from your records" and "hidden
+            from the AI provider" is exactly the risk this tool is built to expose.
+          </p>
         </div>
 
         <div className="how-it-works">

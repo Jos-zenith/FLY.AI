@@ -14,6 +14,12 @@ REGEX_PATTERNS = {
     "PAN": re.compile(r"\b[A-Z]{5}[0-9]{4}[A-Z]\b"),
     "AADHAAR": re.compile(r"\b\d{4}\s?\d{4}\s?\d{4}\b"),
     "CREDIT_CARD": re.compile(r"\b(?:\d[ -]*?){13,16}\b"),
+    # US Social Security number, dashed 3-2-4 format only (e.g.
+    # 123-45-6789). Deliberately not matching a bare 9-digit run with no
+    # separators -- that would collide with plain order/account numbers
+    # far too often, the same false-positive problem the Luhn check
+    # exists to solve for CREDIT_CARD.
+    "SSN": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
 }
 
 # Trigger-word heuristic for NAME, e.g. "reminder email to Ramesh" or

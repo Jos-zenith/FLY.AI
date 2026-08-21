@@ -14,8 +14,23 @@ const emptyAnalytics = {
   agent_run_durations: [],
 }
 
+const mockAssets = [
+  { name: 'chat', declared_purpose: 'General-purpose assistant chat.', declared_data_sources: [], monitoring_enabled: true, updated_at: null },
+  { name: 'customer-support', declared_purpose: 'Handle customer support tickets.', declared_data_sources: ['FAQ DB'], monitoring_enabled: true, updated_at: null },
+  { name: 'billing-agent', declared_purpose: 'Answer billing questions.', declared_data_sources: ['Billing DB'], monitoring_enabled: true, updated_at: null },
+]
+
 function mockFetch({ chatOk = true, summaryOk = true } = {}) {
   return vi.fn((url, options) => {
+    if (options?.method === 'PATCH' && url.includes('/dashboard/assets/')) {
+      const name = decodeURIComponent(url.split('/dashboard/assets/')[1])
+      const body = JSON.parse(options.body)
+      const row = mockAssets.find((a) => a.name === name) || { name, declared_purpose: null, declared_data_sources: [], updated_at: null }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ...row, monitoring_enabled: body.monitoring_enabled }) })
+    }
+    if (url.includes('/dashboard/assets')) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(mockAssets) })
+    }
     if (options?.method === 'POST' && url.includes('/chat')) {
       if (!chatOk) {
         return Promise.resolve({ ok: false, json: () => Promise.resolve({ detail: 'Chat request failed' }) })

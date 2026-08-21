@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { LayoutDashboard, BarChart3, MessageSquare, GitBranch, ShieldAlert, MessageSquarePlus } from 'lucide-react'
+import { LayoutDashboard, BarChart3, MessageSquare, GitBranch, ShieldAlert, MessageSquarePlus, Database } from 'lucide-react'
 
 // three.js is a ~600KB dependency and this orb is purely decorative, so it's
 // code-split out of the main bundle and streamed in after first paint
@@ -31,6 +31,12 @@ const NAV_ITEMS = [
     desc: 'Did each AI agent stay within scope?',
     icon: GitBranch,
   },
+  {
+    id: 'assets',
+    label: 'AI Assets',
+    desc: 'Declared purpose, data sources, and monitoring per tool',
+    icon: Database,
+  },
 ]
 
 export function Sidebar({ activeView, onNavigate, onNewChat, stats }) {
@@ -41,7 +47,7 @@ export function Sidebar({ activeView, onNavigate, onNewChat, stats }) {
           <ParticleOrb size={40} />
         </Suspense>
         <div>
-          <span className="sidebar-title">Vict AI</span>
+          <span className="sidebar-title">AI Usage Monitor</span>
           <span className="sidebar-subtitle">Catches leaks in AI prompts, in real time</span>
         </div>
       </div>

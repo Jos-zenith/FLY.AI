@@ -27,8 +27,18 @@ What it creates:
 
 import argparse
 import sys
+from pathlib import Path
 
 import httpx
+
+# testbed/ lives at the repo root, one level up from backend/ -- add it to
+# sys.path so this script can be run directly (`python scripts/seed_demo_data.py`
+# from backend/) without needing the repo installed as a package.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from testbed.customer_support_demo import SCENARIOS, drive_scenarios  # noqa: E402
 
 CHAT_PROMPTS = [
     {
@@ -99,6 +109,21 @@ def seed(base_url: str) -> None:
         print(f"  run_id={breach['run_id']} declared={breach['declared']} observed={breach['observed']}")
         print(f"  unexpected={breach['unexpected']}")
         print(f"  governance_alert={breach['governance_alert']} (expected: True)")
+
+        # testbed/customer_support_demo.py defines a second, independent
+        # set of realistic scenarios (see its module docstring for why
+        # this exists as a separate module rather than more inline
+        # literals here). Driving them through the same real /chat and
+        # /agent/run endpoints exercises that module for real instead of
+        # leaving it as an unused scenario generator.
+        print(f"\n-- Driving {len(SCENARIOS)} testbed scenarios (testbed/customer_support_demo.py) --")
+        testbed_results = drive_scenarios(client, SCENARIOS)
+        for scenario, result in zip(SCENARIOS, testbed_results):
+            pii = result["chat"].get("pii_metadata") or {}
+            pii_summary = ", ".join(f"{k}:{v}" for k, v in pii.items()) or "none"
+            agent = result["agent_run"]
+            scope = "scope violation" if agent["unexpected"] else "within scope"
+            print(f"  [{scenario.asset}] ticket {scenario.ticket_id}: PII={pii_summary}, agent={scope}")
 
         print("\nDone. Open the dashboard's Agent Runs tab to see both runs, and Overview/Prompts for PII data.")
 

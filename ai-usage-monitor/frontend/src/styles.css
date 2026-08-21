@@ -1671,3 +1671,128 @@ pre {
     flex-direction: column;
   }
 }
+
+/* ---------- Toggle switch (asset monitoring on/off) ---------- */
+
+.toggle-switch {
+  position: relative;
+  width: 34px;
+  height: 19px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(242, 239, 232, 0.08);
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.toggle-switch:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.toggle-switch.on {
+  background: rgba(156, 175, 140, 0.35);
+  border-color: rgba(156, 175, 140, 0.5);
+}
+
+.toggle-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--text);
+  transition: transform 0.15s ease;
+}
+
+.toggle-switch.on .toggle-switch-knob {
+  transform: translateX(15px);
+  background: var(--ok);
+}
+
+/* ---------- AI Assets registry view ---------- */
+
+.asset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.asset-card {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.asset-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.asset-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+}
+
+.asset-card-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.asset-monitor-icon.on {
+  color: var(--ok);
+}
+
+.asset-monitor-icon.off {
+  color: var(--text-faint);
+}
+
+.asset-toggle-label {
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.asset-card-purpose {
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.asset-card-sources {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.asset-card-sources-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+}
+
+/* ---------- Hero-page monitoring toggle (Kingsly's touchpoint) ---------- */
+
+.chat-monitor-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 4px;
+}
+
+.chat-monitor-toggle-label {
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  white-space: nowrap;
+}

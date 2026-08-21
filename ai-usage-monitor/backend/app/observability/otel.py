@@ -11,6 +11,8 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import ConsoleSpanExporter, SimpleSpanProcessor
 
+from app.core.config import settings
+
 _tracer_provider: TracerProvider | None = None
 _httpx_instrumented = False
 
@@ -26,7 +28,7 @@ def initialize_observability(app: Any) -> TracerProvider | None:
     resource = Resource.create({
         "service.name": "ai-usage-monitor",
         "service.version": "1.0.0",
-        "deployment.environment": "development",
+        "deployment.environment": settings.environment,
     })
 
     current_provider = trace.get_tracer_provider()

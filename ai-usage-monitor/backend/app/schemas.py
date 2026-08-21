@@ -87,3 +87,15 @@ class UsageEventOut(BaseModel):
     application: str
     event_type: str
     created_at: datetime | None
+
+
+class AiAssetOut(BaseModel):
+    name: str
+    declared_purpose: str | None
+    declared_data_sources: list[str]
+    monitoring_enabled: bool
+    updated_at: datetime | None
+
+
+class AssetMonitoringUpdate(BaseModel):
+    monitoring_enabled: bool = Field(description="Turn prompt monitoring on/off for this asset at runtime.")

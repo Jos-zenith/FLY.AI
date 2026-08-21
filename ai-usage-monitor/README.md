@@ -146,6 +146,8 @@ This drives the real `/chat` and `/agent/run` endpoints (it does not write fake 
 
 The Agent Runs tab renders this as a visual diff, not just a status line: the Observed row highlights the undeclared source inline with a warning icon, and an amber "Scope violation: Orders DB" pill sits next to the run.
 
+The script also drives the scenarios defined in [`testbed/customer_support_demo.py`](testbed/customer_support_demo.py) through the same real endpoints — see [`testbed/README.md`](testbed/README.md) for why that module exists separately from the hand-written prompts above.
+
 ## Main endpoints
 
 - `POST /chat` — demo chat endpoint with PII sanitize/redact flow
@@ -155,6 +157,41 @@ The Agent Runs tab renders this as a visual diff, not just a status line: the Ob
 - `GET /dashboard/analytics` — usage over time, model usage, tokens, latency, failure rate, asset comparison, agent runtime summary
 - `GET /dashboard/prompts` — sanitized prompt browsing and filtering
 - `GET /dashboard/runs` — agent execution records
+- `GET /dashboard/assets` — the AI asset registry: every monitored tool's declared purpose, declared data sources, and monitoring on/off state
+- `PATCH /dashboard/assets/{name}` — toggle monitoring for one asset at runtime
+
+## AI asset registry & the employee-facing monitoring toggle
+
+Every AI tool this monitor knows about — `chat`, `customer-support`, `billing-agent`, or anything else a prompt names — gets a row in an `AiAsset` table (`app/models/ai_asset.py`): a declared purpose, declared data sources, and a `monitoring_enabled` flag. Three assets are seeded on startup (`app/services/asset_registry.py`); anything else is auto-registered the first time a prompt names it, so the registry never silently misses traffic.
+
+This is deliberately a *second*, runtime-toggleable control, layered on top of the existing deploy-time `PROMPT_MONITORING_ENABLED` / `PROMPT_MONITORING_DISABLED_ASSETS` env vars. The env vars require a redeploy to change; the registry flag takes effect on the next request. `capture_prompt_log()` (`app/services/prompt_capture.py`) checks both before persisting anything.
+
+The UI exposes this two ways, matching two different personas from the design work behind this project:
+
+- An **AI Assets** view in the dashboard sidebar — a governance-lead-facing registry table showing every asset's declared purpose, data sources, and monitoring state, each with its own toggle.
+- A **"Monitored / Not monitored" toggle right on the chat hero**, next to the asset picker — because the end-user persona this project is designed around never opens the internal dashboard at all. Putting the control at the point of use, not behind a settings screen nobody in that role would find, is the point.
+
+Toggling either one calls the same `PATCH /dashboard/assets/{name}` endpoint and is covered by an integration test (`tests/test_asset_registry.py::test_toggling_monitoring_off_actually_suppresses_prompt_capture`) that asserts the *actual effect* — a prompt sent while monitoring is off does not show up in `/dashboard/prompts` — not just that the flag flips.
+
+## Observability exporter: console today, OTLP in production
+
+`app/observability/otel.py` wires up real OpenTelemetry instrumentation (FastAPI + HTTPX auto-instrumentation, plus custom gateway spans) but exports every span with `ConsoleSpanExporter` — spans print to stdout rather than going anywhere durable. That's a deliberate choice for a demo: zero infrastructure to stand up, and every evaluator can see spans appear in the terminal the moment they run the app.
+
+The production swap is one exporter, not a redesign — the SDK setup, resource attributes, and instrumentation calls in `initialize_observability()` stay exactly as they are:
+
+```python
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+# Swap ConsoleSpanExporter -> OTLPSpanExporter, and SimpleSpanProcessor ->
+# BatchSpanProcessor (batches + exports off the request thread instead of
+# blocking each request on a synchronous console write).
+provider.add_span_processor(
+    BatchSpanProcessor(OTLPSpanExporter(endpoint="http://otel-collector:4317"))
+)
+```
+
+Point that endpoint at an OpenTelemetry Collector, and it fans out to Jaeger (trace visualization), Datadog, Honeycomb, or any other OTLP-compatible backend from one place — the application code never needs to know which backend is downstream. The only other production changes worth naming: `SimpleSpanProcessor` (synchronous, exports inline with the request) should become `BatchSpanProcessor` (async, batched) so tracing overhead doesn't sit on the request's critical path, and `deployment.environment` in the `Resource` (currently hardcoded to `"development"`) should read from `settings.environment`.
 
 ## Evaluator notes
 
@@ -170,7 +207,7 @@ This monitor is intentionally a realistic demo/testbed, not a production securit
 - Raw prompt text is not stored in the local database.
 - PII counts and sanitized prompts are stored instead.
 - Tool arguments and prompt traces are sanitized before persistence.
-- The gateway still forwards the original prompt to the configured upstream AI provider. That is a real limitation of any proxy architecture and is explicitly documented here.
+- Both `/chat` and `/gateway/v1/messages` still forward the original, unredacted prompt to the model/upstream AI provider — only local storage is sanitized. That is a real limitation of any proxy architecture, not an oversight, and it's the specific gap this project exists to make visible rather than paper over.
 - Access control is optional and demo-only. It is not a production authorization model.
 
 ## PII detection limits
@@ -181,6 +218,7 @@ The project supports best-effort detection for:
 - phone numbers
 - PAN/Aadhaar-like identifiers
 - common credit-card patterns
+- US Social Security numbers (dashed `123-45-6789` format only — see the false-positive note below)
 - names, via two layers described below
 
 **Names are detected two ways, and which one runs depends on what's installed.** An optional NER pipeline (`dslim/bert-base-NER` via `transformers`) gives the more accurate result, but it needs a model backend (`torch` or `tensorflow`) that is **not** pinned in `requirements.txt` — pulling in a multi-hundred-MB deep learning framework by default would make a from-scratch install of a demo project needlessly heavy. On a plain `pip install -r requirements.txt`, `get_ner()` fails to load (caught, logged once, never retried — see `services/pii.py`) and the app falls back to a **trigger-word regex heuristic**: it matches a capitalized word or two directly after `to` / `for` / `dear` / `hi` / `hello` / `regards` / `from`, which is exactly what makes this repository's own headline example work out of the box:
@@ -196,7 +234,7 @@ This heuristic is intentionally narrow, and its failure modes are known and test
 
 If `torch` is installed, the NER pipeline takes over and both cases improve, since it reasons about context rather than trigger words. Both layers can produce false positives for capitalized organization names, and neither guarantees dependable identity resolution for all real-world text — this is a best-effort detection layer, not a production identity-classification system.
 
-A Luhn checksum guards the credit-card pattern specifically, since a bare 13-16 digit regex alone flags order numbers and tracking IDs as card numbers far too often.
+A Luhn checksum guards the credit-card pattern specifically, since a bare 13-16 digit regex alone flags order numbers and tracking IDs as card numbers far too often. SSN detection takes the same stance by requiring the dashed `123-45-6789` format rather than a bare 9-digit run — a bare run collides with order numbers and reference IDs just as often as the credit-card case, and there's no Luhn-style checksum for SSNs to fall back on, so the dashes are the only reliable signal available without a real validation service.
 
 Every detection is stored as structured metadata alongside the sanitized text, not just inline redaction markers — e.g. a prompt containing an email and a phone number is stored as `sanitized_prompt: "Contact <EMAIL> or <PHONE>"` with `pii_detected: {"EMAIL": 1, "PHONE": 1}`. The Prompts and Overview tabs read this metadata directly, so the dashboard can show *what kind* of PII was caught, not just that something was.
 
@@ -256,3 +294,4 @@ The documented verification path is intentionally simple enough to reproduce on 
 - PII detection is heuristic and should not be treated as a definitive identity classifier.
 - Instrumentation only captures events that pass through the implemented wrappers and spans.
 - This project is suitable as a monitoring demo and evaluation artifact, not as a full enterprise AI governance platform.
+- No real-time alerting (email/Slack/webhook) on a scope violation or a PII catch. Governance state is visible the moment you open the dashboard — the Agent Runs and Overview tabs already surface every violation and PII event live — but nothing pushes a notification out on its own. This is a deliberate scope boundary for a POC: the detection and governance-diffing logic (the hard, novel part) is built and tested; wiring its existing signals to a notification channel is comparatively mechanical and was left out to keep the surface area focused.

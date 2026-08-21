@@ -6,8 +6,10 @@ from sqlalchemy import case, func
 from app.core.database import Base
 from app.core.config import settings
 from app.db.session import get_db
-from app.models import AgentRun, PromptLog
+from app.models import AgentRun, AiAsset, PromptLog
+from app.schemas import AiAssetOut, AssetMonitoringUpdate
 from app.services.agent_tracker import diff_run
+from app.services.asset_registry import get_or_register_asset
 from app.services.prompt_capture import purge_expired_prompt_logs
 
 
@@ -35,6 +37,25 @@ def require_dashboard_access(x_api_key: str | None = Header(default=None, alias=
         )
 
 router = APIRouter(prefix="/dashboard")
+
+
+@router.get("/assets", response_model=list[AiAssetOut])
+def list_assets(_=Depends(require_dashboard_access)):
+    db = next(get_db())
+    return db.query(AiAsset).order_by(AiAsset.name).all()
+
+
+@router.patch("/assets/{name}", response_model=AiAssetOut)
+def update_asset_monitoring(name: str, payload: AssetMonitoringUpdate, _=Depends(require_dashboard_access)):
+    db = next(get_db())
+    # get_or_register_asset (not a plain lookup) so toggling monitoring
+    # for an asset that has real traffic but was never seeded still
+    # works, instead of 404ing on anything outside DEFAULT_ASSETS.
+    asset = get_or_register_asset(db, name)
+    asset.monitoring_enabled = payload.monitoring_enabled
+    db.commit()
+    db.refresh(asset)
+    return asset
 
 
 @router.get("/prompts")
