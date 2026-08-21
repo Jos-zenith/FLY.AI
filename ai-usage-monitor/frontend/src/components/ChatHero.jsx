@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { previewPiiCounts } from '../lib/piiPreview.js'
 import { ToggleSwitch } from './views/AssetsView.jsx'
+import { AnimatedPenguin } from './AnimatedPenguin.jsx'
 
 const SUGGESTIONS = [
   'Write a reminder email to Ramesh, phone 98401xxxxx.',
@@ -143,7 +144,7 @@ export function ChatHero({ onSubmit, assetOptions = [], assets = [], onToggleMon
         <div className="chat-hero-brand">
           <span className="chat-hero-mark" aria-hidden="true" />
           <div>
-            <span className="chat-hero-brand-title">AI Usage Monitor</span>
+            <span className="chat-hero-brand-title">VICT AI</span>
             <span className="chat-hero-brand-tag">Catches sensitive data in AI prompts before it becomes a leak</span>
           </div>
         </div>
@@ -154,7 +155,7 @@ export function ChatHero({ onSubmit, assetOptions = [], assets = [], onToggleMon
       </div>
 
       <div className="chat-hero-body">
-        <p className="eyebrow">A working demo, not a mockup</p>
+        <AnimatedPenguin width={116} height={116} />
         <h1>Send a prompt. Watch what this tool catches.</h1>
 
         <div className="chat-input-shell card-3d">
@@ -276,15 +277,6 @@ export function ChatHero({ onSubmit, assetOptions = [], assets = [], onToggleMon
               </button>
             ))}
           </div>
-        </div>
-
-        <div className="chat-hero-footnote">
-          <ShieldAlert size={15} strokeWidth={2.2} aria-hidden="true" />
-          <p>
-            PII is redacted before it's stored in this dashboard — but, just like a real deployment, the raw
-            prompt still reaches the underlying AI model. That gap between "hidden from your records" and "hidden
-            from the AI provider" is exactly the risk this tool is built to expose.
-          </p>
         </div>
 
         <div className="how-it-works">

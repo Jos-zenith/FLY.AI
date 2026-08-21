@@ -94,12 +94,6 @@ export function AssetsView({ assets, onToggleMonitoring, onRefresh }) {
         </button>
       </div>
 
-      <p className="detection-disclaimer">
-        Every AI tool this monitor has seen -- whether seeded on startup or auto-registered the first time a prompt
-        named it -- gets a row here. Turning monitoring off for an asset takes effect immediately: new prompts
-        through it are no longer captured or stored, without a redeploy.
-      </p>
-
       {assets.length ? (
         <div className="asset-grid">
           {assets.map((asset) => (

@@ -10,31 +10,26 @@ const NAV_ITEMS = [
   {
     id: 'overview',
     label: 'Overview',
-    desc: 'Everything captured so far, at a glance',
     icon: LayoutDashboard,
   },
   {
     id: 'analytics',
     label: 'Analytics',
-    desc: 'Usage trends, model load, latency, failures',
     icon: BarChart3,
   },
   {
     id: 'prompts',
     label: 'Prompts',
-    desc: 'Every sanitized prompt, searchable',
     icon: MessageSquare,
   },
   {
     id: 'runs',
     label: 'Agent Runs',
-    desc: 'Did each AI agent stay within scope?',
     icon: GitBranch,
   },
   {
     id: 'assets',
     label: 'AI Assets',
-    desc: 'Declared purpose, data sources, and monitoring per tool',
     icon: Database,
   },
 ]
@@ -47,7 +42,7 @@ export function Sidebar({ activeView, onNavigate, onNewChat, stats }) {
           <ParticleOrb size={40} />
         </Suspense>
         <div>
-          <span className="sidebar-title">AI Usage Monitor</span>
+          <span className="sidebar-title">VICT AI</span>
           <span className="sidebar-subtitle">Catches leaks in AI prompts, in real time</span>
         </div>
       </div>
@@ -66,20 +61,16 @@ export function Sidebar({ activeView, onNavigate, onNewChat, stats }) {
 
       <nav className="sidebar-nav">
         <span className="sidebar-nav-label">Views</span>
-        {NAV_ITEMS.map(({ id, label, desc, icon: Icon }) => (
+        {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             type="button"
             className={`sidebar-nav-item btn-3d${activeView === id ? ' active' : ''}`}
             onClick={() => onNavigate(id)}
             aria-current={activeView === id ? 'page' : undefined}
-            title={desc}
           >
             <Icon className="sidebar-nav-icon" size={16} strokeWidth={2} aria-hidden="true" />
-            <span className="sidebar-nav-text">
-              <span className="sidebar-nav-label-text">{label}</span>
-              <span className="sidebar-nav-desc">{desc}</span>
-            </span>
+            <span className="sidebar-nav-label-text">{label}</span>
           </button>
         ))}
       </nav>

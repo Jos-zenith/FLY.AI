@@ -82,7 +82,7 @@ describe('App', () => {
     global.fetch = mockFetch()
     render(<App />)
     expect(screen.getByRole('heading', { level: 1, name: 'Send a prompt. Watch what this tool catches.' })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { level: 1, name: 'AI Usage Monitor' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 1, name: 'VICT AI' })).not.toBeInTheDocument()
   })
 
   it('hands off from the chat hero to the dashboard after a successful prompt', async () => {
@@ -95,7 +95,7 @@ describe('App', () => {
     const sendBtn = document.querySelector('.chat-send-btn')
     await user.click(sendBtn)
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'AI Usage Monitor' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'VICT AI' })).toBeInTheDocument()
     expect(screen.getByText(/Just captured/i)).toBeInTheDocument()
     expect(document.querySelector('.just-captured-sanitized').textContent).toBe('Contact me at <EMAIL>')
   })
@@ -108,7 +108,7 @@ describe('App', () => {
     const textarea = screen.getByPlaceholderText(/Message the monitored assistant/i)
     await user.type(textarea, 'hello')
     await user.click(document.querySelector('.chat-send-btn'))
-    await screen.findByRole('heading', { level: 1, name: 'AI Usage Monitor' })
+    await screen.findByRole('heading', { level: 1, name: 'VICT AI' })
 
     await user.click(screen.getByRole('button', { name: /Prompts/i }))
     expect(await screen.findByRole('heading', { level: 1, name: 'Prompts' })).toBeInTheDocument()
@@ -126,7 +126,7 @@ describe('App', () => {
 
     await user.type(screen.getByPlaceholderText(/Message the monitored assistant/i), 'hello')
     await user.click(document.querySelector('.chat-send-btn'))
-    await screen.findByRole('heading', { level: 1, name: 'AI Usage Monitor' })
+    await screen.findByRole('heading', { level: 1, name: 'VICT AI' })
 
     await user.click(screen.getByRole('button', { name: /New prompt/i }))
     expect(await screen.findByRole('heading', { level: 1, name: 'Send a prompt. Watch what this tool catches.' })).toBeInTheDocument()

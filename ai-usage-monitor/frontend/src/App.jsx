@@ -17,24 +17,19 @@ const API_URL = import.meta.env.VITE_API_URL || 'https://fly-ai-dgsd.onrender.co
 
 const VIEW_META = {
   overview: {
-    title: 'AI Usage Monitor',
-    description: 'Live snapshot of every prompt, leak, and agent action this monitor has caught.',
+    title: 'VICT AI',
   },
   analytics: {
     title: 'Analytics',
-    description: 'Trends, model load, and response health over time.',
   },
   prompts: {
     title: 'Prompts',
-    description: 'Every captured prompt, sanitized and searchable.',
   },
   runs: {
     title: 'Agent Runs',
-    description: 'Declared scope vs. what each agent actually touched.',
   },
   assets: {
     title: 'AI Assets',
-    description: 'Every AI tool this monitor knows about, its declared purpose and data sources, and whether monitoring is on.',
   },
 }
 
@@ -236,7 +231,6 @@ function App() {
           <header className="hero">
             <div>
               <h1>{viewMeta.title}</h1>
-              <p>{viewMeta.description}</p>
             </div>
             <button
               className="btn-3d hero-refresh"
