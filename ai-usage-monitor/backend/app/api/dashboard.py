@@ -166,20 +166,6 @@ def usage_analytics(_=Depends(require_dashboard_access)):
 
     total_pii_events = sum(_pii_total_for_log(log) for log in logs)
 
-    if asset_rows:
-        asset_rows.insert(
-            0,
-            {
-                "asset": "all_assets",
-                "requests": total_requests,
-                "pii_events": total_pii_events,
-                "input_tokens": total_input,
-                "output_tokens": total_output,
-                "avg_latency_ms": round(float(avg_latency), 2),
-                "failed": total_failures,
-            },
-        )
-
     duration_rows = db.query(
         AgentRun.agent_id,
         func.count(AgentRun.id).label("runs"),
@@ -204,6 +190,10 @@ def usage_analytics(_=Depends(require_dashboard_access)):
     return {
         "usage_over_time": usage_over_time,
         "model_usage": model_usage_rows,
+        # Per-asset rows only -- no synthetic "all assets" row mixed in.
+        # Anything that wants the grand total reads it explicitly from
+        # token_usage/latency/failure_rate below instead of having to know
+        # to filter a magic asset name out of this list.
         "asset_comparison": asset_rows,
         "token_usage": {
             "input_tokens": int(total_input),
@@ -218,6 +208,9 @@ def usage_analytics(_=Depends(require_dashboard_access)):
             "failed": total_failures,
             "total": total_requests,
             "rate": round((total_failures / total_requests * 100) if total_requests else 0.0, 2),
+        },
+        "pii_events": {
+            "total": total_pii_events,
         },
         "agent_run_durations": agent_run_durations,
     }

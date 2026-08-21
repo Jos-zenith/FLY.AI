@@ -16,6 +16,24 @@ REGEX_PATTERNS = {
     "CREDIT_CARD": re.compile(r"\b(?:\d[ -]*?){13,16}\b"),
 }
 
+# Trigger-word heuristic for NAME, e.g. "reminder email to Ramesh" or
+# "Dear John Smith". This exists because the optional NER pipeline below
+# depends on a model backend (torch/tensorflow) that is NOT pinned in
+# requirements.txt -- on a default `pip install -r requirements.txt`,
+# get_ner() fails to load and NAME detection would otherwise never fire at
+# all, silently. That would break the project's own headline example
+# ("Ramesh" -> "<NAME>") on a clean install with no NER extras.
+#
+# This is a narrow, explicitly best-effort substitute, not a real NER
+# model: it only catches a capitalized name directly after one of a small
+# set of trigger words, so it misses names with no trigger word ("call
+# Ramesh back") and false-positives on capitalized non-names that happen
+# to follow a trigger ("access to Production", "thanks to Everyone"). See
+# the "PII detection limits" section in the README.
+NAME_TRIGGER_PATTERN = re.compile(
+    r"\b(?:to|for|dear|hi|hello|regards|from)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b"
+)
+
 _ner_pipeline = None
 _ner_load_failed = False
 
@@ -81,6 +99,16 @@ def _luhn_checksum_valid(digits: str) -> bool:
     return total % 10 == 0
 
 
+def _detect_heuristic_names(text: str) -> List[Span]:
+    spans: List[Span] = []
+    for match in NAME_TRIGGER_PATTERN.finditer(text or ""):
+        # Redact only the captured name (group 1), not the trigger word
+        # in front of it -- "to Ramesh" should become "to <NAME>", not
+        # "<NAME>".
+        spans.append(Span(match.start(1), match.end(1), "NAME", "heuristic", score=0.6))
+    return spans
+
+
 def detect(text: str) -> List[Span]:
     spans: List[Span] = []
 
@@ -93,6 +121,8 @@ def detect(text: str) -> List[Span]:
                     # non-card digit run rather than redacting it as PII.
                     continue
             spans.append(Span(match.start(), match.end(), label, "regex"))
+
+    spans.extend(_detect_heuristic_names(text))
 
     ner = get_ner()
     if ner is not None:

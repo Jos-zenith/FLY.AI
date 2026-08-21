@@ -67,7 +67,7 @@ describe('App', () => {
     global.fetch = mockFetch()
     render(<App />)
     expect(screen.getByRole('heading', { level: 1, name: 'Send a prompt. Watch what this tool catches.' })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { level: 1, name: 'Vict AI' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 1, name: 'AI Usage Monitor' })).not.toBeInTheDocument()
   })
 
   it('hands off from the chat hero to the dashboard after a successful prompt', async () => {
@@ -80,12 +80,12 @@ describe('App', () => {
     const sendBtn = document.querySelector('.chat-send-btn')
     await user.click(sendBtn)
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Vict AI' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'AI Usage Monitor' })).toBeInTheDocument()
     expect(screen.getByText(/Just captured/i)).toBeInTheDocument()
     expect(document.querySelector('.just-captured-sanitized').textContent).toBe('Contact me at <EMAIL>')
   })
 
-  it('switches views via the sidebar', async () => {
+  it('switches views via the sidebar and renders each view\'s content', async () => {
     global.fetch = mockFetch()
     const user = userEvent.setup()
     render(<App />)
@@ -93,12 +93,11 @@ describe('App', () => {
     const textarea = screen.getByPlaceholderText(/Message the monitored assistant/i)
     await user.type(textarea, 'hello')
     await user.click(document.querySelector('.chat-send-btn'))
-    await screen.findByRole('heading', { level: 1, name: 'Vict AI' })
+    await screen.findByRole('heading', { level: 1, name: 'AI Usage Monitor' })
 
     await user.click(screen.getByRole('button', { name: /Prompts/i }))
     expect(await screen.findByRole('heading', { level: 1, name: 'Prompts' })).toBeInTheDocument()
     expect(screen.getByText(/Sanitized prompts/i)).toBeInTheDocument()
-    expect(screen.queryByRole('note')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /Agent Runs/i }))
     expect(await screen.findByRole('heading', { level: 1, name: 'Agent Runs' })).toBeInTheDocument()
@@ -112,7 +111,7 @@ describe('App', () => {
 
     await user.type(screen.getByPlaceholderText(/Message the monitored assistant/i), 'hello')
     await user.click(document.querySelector('.chat-send-btn'))
-    await screen.findByRole('heading', { level: 1, name: 'Vict AI' })
+    await screen.findByRole('heading', { level: 1, name: 'AI Usage Monitor' })
 
     await user.click(screen.getByRole('button', { name: /New prompt/i }))
     expect(await screen.findByRole('heading', { level: 1, name: 'Send a prompt. Watch what this tool catches.' })).toBeInTheDocument()

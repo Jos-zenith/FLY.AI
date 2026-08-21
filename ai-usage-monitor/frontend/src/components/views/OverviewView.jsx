@@ -1,4 +1,15 @@
-import { CheckCircle2, AlertTriangle, Activity, Boxes, MessagesSquare, GitBranch, Cpu, Gauge, Layers } from 'lucide-react'
+import {
+  CheckCircle2,
+  AlertTriangle,
+  Activity,
+  Boxes,
+  MessagesSquare,
+  GitBranch,
+  Cpu,
+  Gauge,
+  Layers,
+  ArrowRight as ArrowRightIcon,
+} from 'lucide-react'
 import { useCountUp } from '../../hooks/useCountUp.js'
 import { Bar } from '../charts/Bar.jsx'
 import { Donut } from '../charts/Donut.jsx'
@@ -46,6 +57,7 @@ export function OverviewView({
   lastResult,
   usageAssetFilter,
   setUsageAssetFilter,
+  onNavigate,
 }) {
   const piiHits = Object.keys(lastResult?.pii_metadata || {}).length
 
@@ -99,6 +111,12 @@ export function OverviewView({
             ))}
             {!piiHits && <span className="pill clean">No PII detected</span>}
           </div>
+          {onNavigate && (
+            <button type="button" className="just-captured-next" onClick={() => onNavigate('runs')}>
+              Next: see if an agent stayed in scope for this kind of request
+              <ArrowRightIcon size={14} strokeWidth={2.2} aria-hidden="true" />
+            </button>
+          )}
         </section>
       )}
 
@@ -157,6 +175,9 @@ export function OverviewView({
           ) : (
             <p className="muted">Nothing caught yet — try a prompt with an email or phone number.</p>
           )}
+          <p className="detection-disclaimer">
+            Best-effort pattern detection, not an identity classifier — full limits documented in the README.
+          </p>
         </div>
       </section>
 

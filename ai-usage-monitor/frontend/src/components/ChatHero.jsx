@@ -131,7 +131,6 @@ export function ChatHero({ onSubmit, assetOptions = [], sessionCaught = 0 }) {
       </div>
 
       <div className="chat-hero-body">
-        <p className="eyebrow">A working demo, not a mockup</p>
         <h1>Send a prompt. Watch what this tool catches.</h1>
 
         <div className="chat-input-shell card-3d">

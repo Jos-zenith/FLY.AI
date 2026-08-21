@@ -10,22 +10,18 @@ const API_URL = 'http://localhost:8000'
 
 const VIEW_META = {
   overview: {
-    eyebrow: 'AI observability dashboard',
-    title: 'Vict AI',
+    title: 'AI Usage Monitor',
     description: 'Live snapshot of every prompt, leak, and agent action this monitor has caught.',
   },
   analytics: {
-    eyebrow: 'Deep dive',
     title: 'Analytics',
     description: 'Trends, model load, and response health over time.',
   },
   prompts: {
-    eyebrow: 'Safe prompt capture',
     title: 'Prompts',
     description: 'Every captured prompt, sanitized and searchable.',
   },
   runs: {
-    eyebrow: 'Governance',
     title: 'Agent Runs',
     description: 'Declared scope vs. what each agent actually touched.',
   },
@@ -188,7 +184,6 @@ function App() {
         <div className="app-main-inner">
           <header className="hero">
             <div>
-              <p className="eyebrow">{viewMeta.eyebrow}</p>
               <h1>{viewMeta.title}</h1>
               <p>{viewMeta.description}</p>
             </div>
@@ -216,6 +211,7 @@ function App() {
               lastResult={lastResult}
               usageAssetFilter={usageAssetFilter}
               setUsageAssetFilter={setUsageAssetFilter}
+              onNavigate={setActiveView}
             />
           )}
 

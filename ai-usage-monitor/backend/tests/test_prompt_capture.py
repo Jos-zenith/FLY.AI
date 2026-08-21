@@ -342,4 +342,9 @@ def test_usage_analytics_counts_only_real_pii_detects(monkeypatch):
     result = dashboard_module.usage_analytics()
 
     assert result["usage_over_time"][0]["pii_events"] == 3
-    assert result["asset_comparison"][0]["pii_events"] == 3
+    # asset_comparison holds only real per-asset rows now -- no synthetic
+    # "all assets" row mixed into index 0. The grand total lives in its own
+    # explicit field instead.
+    assert result["pii_events"]["total"] == 3
+    per_asset_pii = {row["asset"]: row["pii_events"] for row in result["asset_comparison"]}
+    assert per_asset_pii == {"support": 1, "sales": 2}

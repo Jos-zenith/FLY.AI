@@ -10,6 +10,15 @@ from app.core.database import Base, engine, get_db
 from app.models.usage_event import UsageEvent
 from app.observability.llm_gateway import router as llm_gateway_router
 from app.observability.otel import initialize_observability
+from app.schemas import (
+    AgentRunRequest,
+    AgentRunResponse,
+    ChatRequest,
+    ChatResponse,
+    DashboardSummary,
+    HealthResponse,
+    UsageEventOut,
+)
 from app.services.agent_tracker import AgentRunContext, diff_run, record_access, record_tool_invocation
 from app.services.llm_client import LLMClient
 from app.services.pii import detect_pii, redact
@@ -47,16 +56,16 @@ app.add_middleware(
 )
 
 
-@app.get("/health")
+@app.get("/health", response_model=HealthResponse)
 def health_check():
     return {"status": "ok", "service": settings.app_name}
 
 
-@app.post("/chat")
-def chat(payload: dict, db: Session = Depends(get_db), _=Depends(require_monitor_access)):
-    message = str(payload.get("message", ""))
-    ai_asset = str(payload.get("ai_asset", "chat"))
-    model_name = str(payload.get("model", "mock-model"))
+@app.post("/chat", response_model=ChatResponse)
+def chat(payload: ChatRequest, db: Session = Depends(get_db), _=Depends(require_monitor_access)):
+    message = payload.message
+    ai_asset = payload.ai_asset
+    model_name = payload.model
 
     sanitized, pii_metadata = redact(message)
     findings = detect_pii(message)
@@ -65,8 +74,8 @@ def chat(payload: dict, db: Session = Depends(get_db), _=Depends(require_monitor
 
     event = UsageEvent(
         application="chat",
-        user_id=str(payload.get("user_id", "anonymous")),
-        session_id=str(payload.get("session_id", "unknown")),
+        user_id=payload.user_id,
+        session_id=payload.session_id,
         event_type="chat_message",
         payload=json.dumps({"message": sanitized, "pii_detected": pii_metadata, "llm_response": llm_result}),
     )
@@ -97,41 +106,41 @@ def chat(payload: dict, db: Session = Depends(get_db), _=Depends(require_monitor
     }
 
 
-@app.post("/agent/run")
-def run_agent(payload: dict, _=Depends(require_monitor_access)):
-    agent_id = str(payload.get("agent_id", "testbed-agent"))
+@app.post("/agent/run", response_model=AgentRunResponse)
+def run_agent(payload: AgentRunRequest, _=Depends(require_monitor_access)):
+    agent_id = payload.agent_id
     declared = ["FAQ DB"]
-    should_query_orders = bool(payload.get("query_orders") or payload.get("customer_mentions_orders") or False)
+    should_query_orders = payload.query_orders or payload.customer_mentions_orders
 
     tools_invoked = ["faq_lookup"]
     if should_query_orders:
         tools_invoked.append("orders_lookup")
 
     with AgentRunContext(agent_id=agent_id, declared_sources=declared, tools_invoked=tools_invoked) as run:
-        record_tool_invocation("faq_lookup", {"query": payload.get("message", "support ticket")})
+        record_tool_invocation("faq_lookup", {"query": payload.message or "support ticket"})
         record_access("FAQ DB")
         if should_query_orders:
             record_tool_invocation(
                 "orders_lookup",
-                {"reason": "customer_mentions_orders", "ticket_id": payload.get("ticket_id")},
+                {"reason": "customer_mentions_orders", "ticket_id": payload.ticket_id},
             )
             record_access("Orders DB")
 
     return diff_run(run.run_id)
 
 
-@app.get("/dashboard/summary")
+@app.get("/dashboard/summary", response_model=DashboardSummary)
 def dashboard_summary(db: Session = Depends(get_db), _=Depends(require_monitor_access)):
     total = db.query(UsageEvent).count()
     return {"total_events": total, "applications": ["chat", "agent"]}
 
 
-@app.get("/dashboard/usage")
+@app.get("/dashboard/usage", response_model=list[UsageEventOut])
 def dashboard_usage(db: Session = Depends(get_db), _=Depends(require_monitor_access)):
     events = db.query(UsageEvent).order_by(UsageEvent.created_at.desc()).limit(10).all()
     return [{
         "id": event.id,
         "application": event.application,
         "event_type": event.event_type,
-        "created_at": event.created_at.isoformat() if event.created_at else None,
+        "created_at": event.created_at,
     } for event in events]

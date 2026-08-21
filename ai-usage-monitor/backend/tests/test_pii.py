@@ -39,6 +39,28 @@ def test_order_number_that_fails_luhn_is_not_flagged_as_credit_card():
     assert "CREDIT_CARD" not in labels
 
 
+def test_heuristic_name_detection_matches_spec_example(monkeypatch):
+    # Force the NER path off so this exercises the regex-only default
+    # install path (no torch/tensorflow backend), which is what a fresh
+    # `pip install -r requirements.txt` actually gets.
+    monkeypatch.setattr(pii_module, "get_ner", lambda: None)
+
+    text = "Write a reminder email to Ramesh, phone 9840123456."
+    redacted, counts = redact(text)
+
+    assert redacted == "Write a reminder email to <NAME>, phone <PHONE>."
+    assert counts == {"NAME": 1, "PHONE": 1}
+
+
+def test_heuristic_name_detection_has_known_false_positives(monkeypatch):
+    # Documented limitation, not a bug: the trigger-word heuristic cannot
+    # tell "Production" (a system, following "to") from an actual name.
+    monkeypatch.setattr(pii_module, "get_ner", lambda: None)
+
+    matches = [span for span in detect("Grant access to Production before Friday.") if span.label == "NAME"]
+    assert matches and matches[0].source == "heuristic"
+
+
 def test_ner_load_failure_is_cached_and_not_retried(monkeypatch):
     monkeypatch.setattr(pii_module, "_ner_pipeline", None)
     monkeypatch.setattr(pii_module, "_ner_load_failed", False)

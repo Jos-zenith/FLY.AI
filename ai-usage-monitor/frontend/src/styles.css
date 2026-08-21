@@ -413,6 +413,36 @@ select {
   background: rgba(242, 239, 232, 0.05);
 }
 
+.chat-hero-footnote {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 62ch;
+  text-align: left;
+  margin-top: 28px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(201, 154, 104, 0.32);
+  background: rgba(201, 154, 104, 0.08);
+  color: #c99a68;
+}
+
+.chat-hero-footnote svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.chat-hero-footnote p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.chat-hero-footnote strong {
+  color: #c99a68;
+}
+
 /* ---------- Layout shell (dashboard) ---------- */
 
 .app-shell {
@@ -742,16 +772,48 @@ select {
   overflow-wrap: anywhere;
 }
 
+.metric-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.metric-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(201, 154, 104, 0.55), rgba(201, 154, 104, 0));
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.metric-card:hover::before {
+  opacity: 1;
+}
+
 .metric-card span {
-  color: var(--text-muted);
-  font-size: 0.82rem;
+  display: block;
+  color: var(--text-faint);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
 }
 
 .metric-card strong {
   display: block;
-  margin-top: 12px;
-  font-size: 1.9rem;
-  font-variant-numeric: tabular-nums;
+  margin-top: 10px;
+  font-size: 2.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  color: var(--text);
+  /* Proportional figures at display size -- tabular-nums makes every
+     digit the width of a '0', which looks loose on a lone large number.
+     Reserved for aligned table/axis columns elsewhere in this file. */
+  font-variant-numeric: normal;
   overflow-wrap: anywhere;
 }
 
@@ -839,19 +901,21 @@ select {
 /* ---------- Charts ---------- */
 
 .metric-card-icon {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(242, 239, 232, 0.06);
-  color: var(--text-muted);
-  margin-bottom: 12px;
+  background: rgba(201, 154, 104, 0.1);
+  color: #c99a68;
+  margin-bottom: 14px;
 }
 
 .metric-card-text {
-  font-size: 1.05rem !important;
+  font-size: 1.15rem !important;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .chart-headline {
@@ -1358,6 +1422,39 @@ pre {
   border-radius: var(--radius-sm);
   padding: 13px 16px;
   background: var(--card-strong);
+}
+
+.just-captured-next {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  margin-top: 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(242, 239, 232, 0.03);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.just-captured-next:hover {
+  background: rgba(242, 239, 232, 0.06);
+  color: var(--text);
+  border-color: rgba(242, 239, 232, 0.2);
+}
+
+.detection-disclaimer {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+  font-size: 0.76rem;
+  color: var(--text-faint);
+  line-height: 1.5;
 }
 
 /* ---------- Tables (usage log, prompts) ---------- */

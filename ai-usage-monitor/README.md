@@ -10,6 +10,19 @@ This repository contains a lightweight AI observability testbed for tracking usa
 - Surface usage analytics in a browser-based dashboard
 - Provide a realistic local demo environment for evaluation and testing
 
+## The one flow to follow
+
+Everything else in this repo supports a single end-to-end story. Follow it in this order and nothing else needs digging up:
+
+1. **A user enters a prompt containing PII** — open the app at `http://localhost:3000`, type a prompt with an email, phone number, or card number (or click one of the example prompts), and send it. Backend: `POST /chat` in [`backend/app/main.py`](backend/app/main.py).
+2. **The system detects and redacts it** — the regex + Luhn-checked detector in [`backend/app/services/pii.py`](backend/app/services/pii.py) finds the PII spans and replaces them with `<TYPE>` markers before anything is written to disk.
+3. **The sanitized prompt gets stored** — [`backend/app/services/prompt_capture.py`](backend/app/services/prompt_capture.py) persists the redacted text plus structured PII counts to the `prompt_logs` table. The raw text is never written.
+4. **The model/gateway interaction happens** — the raw (unredacted) prompt still goes to the configured LLM/gateway client in `backend/app/services/llm_client.py`, exactly as it would in a real deployment. This is the gap the whole project exists to make visible — see "Privacy and governance boundary" below.
+5. **The dashboard shows metrics and findings** — the same page redirects to the Overview tab, where "Just captured" shows exactly what was redacted, and the Prompts tab lists it as a searchable, exportable row.
+6. **An agent run shows declared vs. observed mismatch** — run `python backend/scripts/seed_demo_data.py` (or `POST /agent/run` with `"query_orders": true`) and open the Agent Runs tab: a clean run shows "Within scope," a scope-breach run shows an amber "Scope violation: Orders DB" pill next to the source it touched but never declared.
+
+Steps 1-5 take under a minute by hand in the running app. Step 6 is one script run. There is no other path through this repo that matters more than this one.
+
 ## Stack
 
 - Backend: Python + FastAPI
@@ -167,15 +180,45 @@ The project supports best-effort detection for:
 - phone numbers
 - PAN/Aadhaar-like identifiers
 - common credit-card patterns
+- names, via two layers described below
 
-It does not guarantee dependable identity resolution for all names or all real-world text. Name detection may miss weakly contextual names or produce false positives for capitalized words and organizations. A Luhn checksum guards the credit-card pattern specifically, since a bare 13-16 digit regex alone flags order numbers and tracking IDs as card numbers far too often.
+**Names are detected two ways, and which one runs depends on what's installed.** An optional NER pipeline (`dslim/bert-base-NER` via `transformers`) gives the more accurate result, but it needs a model backend (`torch` or `tensorflow`) that is **not** pinned in `requirements.txt` — pulling in a multi-hundred-MB deep learning framework by default would make a from-scratch install of a demo project needlessly heavy. On a plain `pip install -r requirements.txt`, `get_ner()` fails to load (caught, logged once, never retried — see `services/pii.py`) and the app falls back to a **trigger-word regex heuristic**: it matches a capitalized word or two directly after `to` / `for` / `dear` / `hi` / `hello` / `regards` / `from`, which is exactly what makes this repository's own headline example work out of the box:
+
+```
+"Write a reminder email to Ramesh, phone 9840123456."
+→ "Write a reminder email to <NAME>, phone <PHONE>."
+```
+
+This heuristic is intentionally narrow, and its failure modes are known and tested (`tests/test_pii.py`):
+- **False negative**: a name with no trigger word in front of it is missed entirely — "call Ramesh back" does not redact "Ramesh".
+- **False positive**: a capitalized non-name after a trigger word gets redacted anyway — "Grant access to Production" redacts "Production" as a name.
+
+If `torch` is installed, the NER pipeline takes over and both cases improve, since it reasons about context rather than trigger words. Both layers can produce false positives for capitalized organization names, and neither guarantees dependable identity resolution for all real-world text — this is a best-effort detection layer, not a production identity-classification system.
+
+A Luhn checksum guards the credit-card pattern specifically, since a bare 13-16 digit regex alone flags order numbers and tracking IDs as card numbers far too often.
 
 Every detection is stored as structured metadata alongside the sanitized text, not just inline redaction markers — e.g. a prompt containing an email and a phone number is stored as `sanitized_prompt: "Contact <EMAIL> or <PHONE>"` with `pii_detected: {"EMAIL": 1, "PHONE": 1}`. The Prompts and Overview tabs read this metadata directly, so the dashboard can show *what kind* of PII was caught, not just that something was.
 
+## Assumptions
+
+- The environment generating AI activity does not need to be a real production app — a small FastAPI testbed that drives real `/chat` and `/agent/run` calls is sufficient to demonstrate the monitoring problem, per the brief's own framing ("The environment is only the testbed for the problem").
+- An AI agent framework (LangGraph/LangChain) is not required. `/agent/run` demonstrates declared-vs-observed source tracking without one, and the brief explicitly allows this ("completely acceptable for the project to be built without any AI agent"). Adding LangGraph here would add a dependency without adding governance signal, since the thing being measured is data-source access, not multi-step reasoning.
+- A single local demo user is assumed; there is no multi-tenant user model. Access control (API key/bearer) is optional and off by default, since the brief prioritizes engineering quality and monitoring accuracy over building a production auth system.
+- "Realistic AI activity" means recognizable customer-support/billing-agent scenarios with real PII patterns and a genuine scope-violation case, not high request volume. The seed script produces a handful of high-signal events rather than thousands of synthetic rows.
+- PostgreSQL is assumed to be the target database; SQLite is a fallback for zero-setup local evaluation only, not a supported production path.
+
+## Key technical decisions
+
+- **Hand-rolled regex + Luhn + optional NER for PII, not a third-party PII SDK.** This keeps the detection logic auditable in ~150 lines instead of hidden behind an opaque service, which matters more for a project whose subject *is* explaining detection capability and limitation honestly.
+- **Structured PII metadata (`{"EMAIL": 1, "PHONE": 1}`) stored alongside sanitized text, not just inline markers.** Inline markers alone would make "which AI assets see the most PII" an expensive text-parsing query instead of a `GROUP BY`.
+- **Declared-vs-observed tracking via a context manager (`AgentRunContext`), not middleware or decorators.** The access pattern (`record_access("Orders DB")` called from inside the agent's own code path) mirrors how a real team would instrument an existing agent with minimal invasiveness, which is the same shape gateway/OTel instrumentation takes in `docs/capability-matrix.md`.
+- **The capability matrix was built by actually implementing each layer (no-app-changes, gateway, application instrumentation) against this same testbed, not by reasoning about them abstractly.** The "what's not visible" column in that matrix reflects what each layer's code in this repo genuinely cannot see, not a textbook claim.
+- **No agent framework.** See Assumptions above — LangGraph/LangChain were evaluated and deliberately not used, since the governance question this project answers (did the agent touch an undeclared source) doesn't require an LLM-driven planning loop.
+
 ## Deployment and repo status
 
-- Deployment: local Docker Compose and FastAPI/Vite startup workflow are supported for development and evaluation.
-- Public repository: this project is not yet published as a public GitHub repository in this workspace snapshot, so no public link is included here.
+- Repository: https://github.com/Jos-zenith/FLY.AI — confirm this is set to **Public** under Settings → General → Danger Zone before submitting, since a private repo an evaluator can't open counts against "Public GitHub repository."
+- Deployment: local Docker Compose and FastAPI/Vite startup workflow are supported for development and evaluation. No hosted deployment link is included yet — the brief marks this "if possible," but a live link (Render/Railway/Fly.io for the backend, Vercel/Netlify for the frontend) is worth adding if time allows, since it's one of the few differentiators an evaluator can check in seconds without cloning anything.
 
 ## Verification commands
 
